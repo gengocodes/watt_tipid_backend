@@ -25,14 +25,10 @@ RUN chown -R appuser:appgroup /app
 # Switch from root to the non-root user
 USER appuser
 
-# Document that the container listens on port 8000
-# This does not actually publish the port;
-# docker-compose.yml handles that
-EXPOSE 8000
+# Cloud Run listens on port 8080 by default
+EXPOSE 8080
 
-# Start FastAPI using Uvicorn
-# app.main:app means:
-# - app = package/folder
-# - main = main.py
-# - app = FastAPI instance inside main.py
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Cloud Run provides the PORT environment variable.
+# If PORT exists, use it.
+# Otherwise, default to 8080 for local Docker runs.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
