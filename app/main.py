@@ -7,6 +7,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import auth
 from app.database.redis import redis_client
@@ -35,9 +36,20 @@ app = FastAPI(
     **_docs_config,
 )
 
-
 app.include_router(auth.router)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://watt-tipid.vercel.app/",
+    ],
+    allow_methods=["*"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+    ],
+)
 
 
 @app.get("/health")
