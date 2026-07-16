@@ -19,8 +19,18 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class TokenResponse(BaseModel):
-    """Token response schema"""
+class UserResponse(BaseModel):
+    """User response schema"""
 
-    access_token: str
-    token_type: str
+    id: str
+    email: EmailStr
+
+
+class User(BaseModel):
+    """User model schema"""
+
+    id: str
+    email: str
+    password: str
+    is_active: bool
+

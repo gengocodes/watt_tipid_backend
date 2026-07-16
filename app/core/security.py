@@ -2,6 +2,8 @@
 Authentication functions
 """
 
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from jose import jwt
@@ -27,3 +29,13 @@ def create_access_token(user_id: str):
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": user_id, "exp": expire}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def generate_refresh_token() -> str:
+    """Generate a secure random string to be used as a refresh token"""
+    return secrets.token_urlsafe(64)
+
+
+def hash_token(token: str) -> str:
+    """Hash a token using SHA-256"""
+    return hashlib.sha256(token.encode()).hexdigest()

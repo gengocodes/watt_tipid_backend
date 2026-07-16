@@ -2,6 +2,7 @@
 WattTipid API
 """
 
+from typing import Any, Dict
 from fastapi import (
     FastAPI,
     Response,
@@ -16,7 +17,7 @@ from app.core.config import ENV
 
 is_dev = ENV == "dev"
 
-_docs_config = (
+_docs_config: Dict[str, Any] = (
     {
         "docs_url": "/docs",
         "redoc_url": "/redoc",
