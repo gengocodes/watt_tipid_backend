@@ -2,11 +2,13 @@
 WattTipid API
 """
 
+from typing import Any, Dict
 from fastapi import (
     FastAPI,
     Response,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import auth
 from app.database.redis import redis_client
@@ -15,7 +17,7 @@ from app.core.config import ENV
 
 is_dev = ENV == "dev"
 
-_docs_config = (
+_docs_config: Dict[str, Any] = (
     {
         "docs_url": "/docs",
         "redoc_url": "/redoc",
@@ -35,9 +37,20 @@ app = FastAPI(
     **_docs_config,
 )
 
-
 app.include_router(auth.router)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://watt-tipid.vercel.app/",
+    ],
+    allow_methods=["*"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+    ],
+)
 
 
 @app.get("/health")
