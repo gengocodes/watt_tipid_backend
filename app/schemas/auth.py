@@ -10,6 +10,8 @@ class RegisterRequest(BaseModel):
 
     email: EmailStr
     password: str
+    first_name: str
+    last_name: str
 
 
 class LoginRequest(BaseModel):
@@ -24,6 +26,8 @@ class UserResponse(BaseModel):
 
     id: str
     email: EmailStr
+    first_name: str
+    last_name: str
 
 
 class User(BaseModel):
@@ -32,5 +36,6 @@ class User(BaseModel):
     id: str
     email: str
     password: str
+    first_name: str
+    last_name: str
     is_active: bool
-

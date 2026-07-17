@@ -47,6 +47,8 @@ async def register(data: RegisterRequest):
     user = User(
         id=user_id,
         email=data.email,
+        first_name=data.first_name,
+        last_name=data.last_name,
         password=hash_password(data.password),
         is_active=True,
     )
@@ -114,7 +116,12 @@ async def login(data: LoginRequest, response: Response):
         max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
     )
 
-    return UserResponse(id=user_id, email=user.email)
+    return UserResponse(
+        id=user_id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+    )
 
 
 @router.post(
@@ -235,4 +242,9 @@ async def logout(request: Request, response: Response):
 @router.get("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
 async def me(current_user: Annotated[User, Depends(get_current_user)]):
     """Return currently logged-in user profile"""
-    return UserResponse(id=current_user.id, email=current_user.email)
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        first_name=current_user.first_name,
+        last_name=current_user.last_name,
+    )
