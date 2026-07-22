@@ -49,6 +49,7 @@ async def register(data: RegisterRequest):
         email=data.email,
         first_name=data.first_name,
         last_name=data.last_name,
+        barangay_city=data.barangay_city,
         password=hash_password(data.password),
         is_active=True,
     )
@@ -121,6 +122,7 @@ async def login(data: LoginRequest, response: Response):
         email=user.email,
         first_name=user.first_name,
         last_name=user.last_name,
+        barangay_city=user.barangay_city,
     )
 
 
@@ -247,4 +249,5 @@ async def me(current_user: Annotated[User, Depends(get_current_user)]):
         email=current_user.email,
         first_name=current_user.first_name,
         last_name=current_user.last_name,
+        barangay_city=current_user.barangay_city,
     )
