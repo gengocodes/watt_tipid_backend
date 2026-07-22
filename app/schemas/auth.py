@@ -12,6 +12,7 @@ class RegisterRequest(BaseModel):
     password: str
     first_name: str
     last_name: str
+    barangay_city: str
 
 
 class LoginRequest(BaseModel):
@@ -28,6 +29,7 @@ class UserResponse(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str
+    barangay_city: str
 
 
 class User(BaseModel):
@@ -39,3 +41,4 @@ class User(BaseModel):
     first_name: str
     last_name: str
     is_active: bool
+    barangay_city: str
