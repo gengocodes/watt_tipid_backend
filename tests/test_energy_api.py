@@ -4,13 +4,14 @@ Tests for endpoints: energy, dashboard, and user settings
 
 # pylint: disable=wrong-import-position
 
-from unittest.mock import patch, AsyncMock
-import pytest
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
-# Mock redis_client before any application imports to avoid socket connections
+# Mock redis_client and MongoClient before any application imports to avoid network connections in CI
+import pymongo
 import app.database.redis
 
+pymongo.MongoClient = MagicMock()
 app.database.redis.redis_client = AsyncMock()
 app.database.redis.redis_client.incr.return_value = 1
 app.database.redis.redis_client.expire.return_value = True
