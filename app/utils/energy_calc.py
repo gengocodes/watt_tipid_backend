@@ -73,7 +73,7 @@ def calculate_category_shares(
         shares[category] = shares.get(category, 0.0) + kwh
         total_kwh += kwh
 
-    result = []
+    result: List[Dict[str, Any]] = []
     for cat, kwh in shares.items():
         percentage = (kwh / total_kwh * 100.0) if total_kwh > 0 else 0.0
         result.append(
