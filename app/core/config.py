@@ -21,6 +21,8 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
+DEFAULT_RATE = float(os.getenv("DEFAULT_RATE", "12.50"))
+
 COOKIE_SECURE: bool
 COOKIE_SAMESITE: Literal["lax", "strict", "none"]
 

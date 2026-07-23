@@ -10,7 +10,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth
+from app.routers import auth, energy, dashboard, user_settings
 from app.database.redis import redis_client
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.core.config import ENV
@@ -38,6 +38,9 @@ app = FastAPI(
 )
 
 app.include_router(auth.router)
+app.include_router(energy.router)
+app.include_router(dashboard.router)
+app.include_router(user_settings.router)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -47,7 +50,7 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 

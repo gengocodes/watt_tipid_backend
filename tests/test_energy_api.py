@@ -1,0 +1,177 @@
+"""
+Tests for endpoints: energy, dashboard, and user settings
+"""
+
+# pylint: disable=wrong-import-position
+
+from unittest.mock import patch, AsyncMock
+import pytest
+from fastapi.testclient import TestClient
+
+# Mock redis_client before any application imports to avoid socket connections
+import app.database.redis
+
+app.database.redis.redis_client = AsyncMock()
+app.database.redis.redis_client.incr.return_value = 1
+app.database.redis.redis_client.expire.return_value = True
+
+from app.main import app
+from app.dependencies.auth import get_current_user
+from app.schemas.auth import User
+
+# Create a mock user
+MOCK_USER_ID = "mock-user-uuid"
+mock_user = User(
+    id=MOCK_USER_ID,
+    email="test@watttipid.ph",
+    password="hashedpassword",
+    first_name="Maria",
+    last_name="Santos",
+    is_active=True,
+    barangay_city="Cebu City",
+)
+
+
+async def mock_get_current_user():
+    """Override get_current_user dependency to return mock_user"""
+    return mock_user
+
+
+app.dependency_overrides[get_current_user] = mock_get_current_user
+client = TestClient(app)
+
+
+@patch("app.services.appliance_service.appliances_collection")
+def test_get_appliances(mock_coll):
+    """Verify GET /energy/appliances retrieves user's scoped list and calculates kWh"""
+    mock_cursor = [
+        {
+            "id": "app-1",
+            "user_id": MOCK_USER_ID,
+            "name": "Air Conditioner",
+            "category": "Cooling",
+            "wattage_watts": 1500.0,
+            "daily_usage_hours": 8.0,
+            "icon": "snowflake",
+            "is_active": True,
+            "created_at": "2026-07-22T00:00:00Z",
+            "updated_at": "2026-07-22T00:00:00Z",
+        }
+    ]
+    mock_coll.find.return_value = mock_cursor
+
+    response = client.get("/energy/appliances")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "Air Conditioner"
+    assert data[0]["monthly_kwh"] == 360.0  # 1500 * 8 * 30 / 1000
+    mock_coll.find.assert_called_once_with({"user_id": MOCK_USER_ID})
+
+
+@patch("app.services.appliance_service.appliances_collection")
+def test_create_appliance(mock_coll):
+    """Verify POST /energy/appliances registers appliance successfully"""
+    payload = {
+        "name": "Refrigerator",
+        "category": "Kitchen",
+        "wattage_watts": 150.0,
+        "daily_usage_hours": 24.0,
+        "icon": "refrigerator",
+    }
+
+    response = client.post("/energy/appliances", json=payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Refrigerator"
+    assert data["user_id"] == MOCK_USER_ID
+    assert data["monthly_kwh"] == 108.0
+    mock_coll.insert_one.assert_called_once()
+
+
+@patch("app.services.dashboard_service.appliances_collection")
+@patch("app.services.dashboard_service.monthly_energy_collection")
+@patch("app.services.user_settings_service.users_collection")
+def test_get_dashboard_summary(mock_users_coll, mock_energy_coll, mock_appliances_coll):
+    """Verify GET /dashboard/summary calculates correct cost projections and trends"""
+    # 1. Mock user rate settings
+    mock_users_coll.find_one.return_value = {
+        "id": MOCK_USER_ID,
+        "settings": {"electricity_rate_php_kwh": 10.0},
+    }
+
+    # 2. Mock active appliances
+    mock_appliances_coll.find.return_value = [
+        {
+            "id": "app-1",
+            "user_id": MOCK_USER_ID,
+            "name": "Electric Fan",
+            "category": "Cooling",
+            "wattage_watts": 60.0,
+            "daily_usage_hours": 10.0,
+            "icon": "wind",
+            "is_active": True,
+            "created_at": "2026-07-22T00:00:00Z",
+            "updated_at": "2026-07-22T00:00:00Z",
+        }
+    ]  # 60 * 10 * 30 / 1000 = 18 kWh
+
+    # 3. Mock historical snapshot trend
+    mock_energy_coll.find.return_value.sort.return_value = [
+        {
+            "id": "snap-1",
+            "user_id": MOCK_USER_ID,
+            "month": "2026-06",
+            "kwh": 15.0,
+            "cost_php": 150.0,
+            "rate_php_kwh": 10.0,
+            "created_at": "2026-06-30T23:59:59Z",
+        }
+    ]
+
+    response = client.get("/dashboard/summary")
+    assert response.status_code == 200
+    data = response.json()
+
+    # Total kWh = 18.0
+    # Cost = 18.0 * 10.0 = 180.0
+    # Score = 100 * exp(-0.00154 * 18) = 97.26 -> 97
+    assert data["total_monthly_kwh"] == 18.0
+    assert data["estimated_monthly_cost"] == 180.0
+    assert data["electricity_rate_php_kwh"] == 10.0
+    assert data["energy_saving_score"] == 97
+    assert data["score_status"] == "Excellent"
+    assert len(data["monthly_trend"]) == 1
+    assert data["monthly_trend"][0]["month"] == "2026-06"
+
+
+@patch("app.services.user_settings_service.users_collection")
+def test_get_user_settings_default(mock_users_coll):
+    """Verify settings fallback to default rate if settings object is absent"""
+    mock_users_coll.find_one.return_value = {
+        "id": MOCK_USER_ID,
+        "email": "test@watttipid.ph",
+    }
+
+    response = client.get("/users/settings")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["electricity_rate_php_kwh"] == 12.50
+
+
+@patch("app.services.user_settings_service.users_collection")
+def test_patch_user_settings(mock_users_coll):
+    """Verify partial settings update saves to MongoDB user settings sub-payload"""
+    mock_users_coll.find_one.return_value = {
+        "id": MOCK_USER_ID,
+        "settings": {"electricity_rate_php_kwh": 12.50},
+    }
+
+    payload = {"electricity_rate_php_kwh": 15.0}
+    response = client.patch("/users/settings", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["electricity_rate_php_kwh"] == 15.0
+    mock_users_coll.update_one.assert_called_once_with(
+        {"id": MOCK_USER_ID}, {"$set": {"settings": {"electricity_rate_php_kwh": 15.0}}}
+    )
