@@ -75,7 +75,7 @@ def test_update_email_fails_incorrect_password(mock_users_coll):
     assert response.json()["detail"] == "Incorrect password"
 
 
-@patch("app.database.mongodb.refresh_tokens_collection")
+@patch("app.services.user_settings_service.refresh_tokens_collection")
 @patch("app.services.user_settings_service.users_collection")
 def test_update_email_success_and_revokes_tokens(mock_users_coll, mock_refresh_coll):
     """Verify email update succeeds with correct password, normalizes email, and revokes tokens"""
@@ -163,7 +163,7 @@ def test_update_password_fails_complexity_checks(mock_users_coll):
     assert response.status_code == 422
 
 
-@patch("app.database.mongodb.refresh_tokens_collection")
+@patch("app.services.user_settings_service.refresh_tokens_collection")
 @patch("app.services.user_settings_service.users_collection")
 def test_update_password_success_and_revokes_tokens(mock_users_coll, mock_refresh_coll):
     """Verify password update succeeds with complexity check, and revokes tokens"""
