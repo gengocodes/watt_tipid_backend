@@ -23,4 +23,9 @@ class MonthlyEnergyRepository:
     def get_user_trends(self, user_id: str) -> List[MonthlyEnergyInDB]:
         """Fetch historical monthly energy trends for a user, sorted by month"""
         cursor = self.collection.find({"user_id": user_id}).sort("month", 1)
-        return [self._to_model(doc) for doc in cursor if doc]
+        trends = []
+        for doc in cursor:
+            t = self._to_model(doc)
+            if t is not None:
+                trends.append(t)
+        return trends

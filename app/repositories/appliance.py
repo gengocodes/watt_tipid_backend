@@ -25,12 +25,22 @@ class ApplianceRepository:
     def get_user_appliances(self, user_id: str) -> List[ApplianceInDB]:
         """Fetch all appliances owned by a user"""
         cursor = self.collection.find({"user_id": user_id})
-        return [self._to_model(doc) for doc in cursor if doc]
+        appliances = []
+        for doc in cursor:
+            app = self._to_model(doc)
+            if app is not None:
+                appliances.append(app)
+        return appliances
 
     def get_active_user_appliances(self, user_id: str) -> List[ApplianceInDB]:
         """Fetch all active appliances owned by a user"""
         cursor = self.collection.find({"user_id": user_id, "is_active": True})
-        return [self._to_model(doc) for doc in cursor if doc]
+        appliances = []
+        for doc in cursor:
+            app = self._to_model(doc)
+            if app is not None:
+                appliances.append(app)
+        return appliances
 
     def get_by_id_and_user(
         self, appliance_id: str, user_id: str
