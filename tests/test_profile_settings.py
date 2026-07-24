@@ -1,14 +1,15 @@
 """
-Tests for user settings profile, email, and password update endpoints
+Tests for user settings profile, email, and password update endpoints using repository stubs
 """
 
 # pylint: disable=wrong-import-position
 
 import datetime
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
 # Mock redis_client and MongoClient before application imports to avoid network connections in CI
+import pytest
 import pymongo
 import app.database.redis
 
@@ -20,11 +21,37 @@ app.database.redis.redis_client.expire.return_value = True
 from app.main import app
 from app.dependencies.auth import get_current_user
 from app.schemas.auth import User
+from app.database.models import UserInDB, RefreshTokenInDB, UserSettings
 from app.core.security import hash_password
+from app.dependencies.repositories import (
+    get_user_repository,
+    get_refresh_token_repository,
+    get_appliance_repository,
+    get_monthly_energy_repository,
+)
+
+# Setup mock repositories
+mock_user_repo = MagicMock()
+mock_token_repo = MagicMock()
+mock_appliance_repo = MagicMock()
+mock_energy_repo = MagicMock()
 
 MOCK_USER_ID = "mock-user-uuid"
 MOCK_PASSWORD_HASH = hash_password("ValidPassword123!")
 
+# Database user representation
+mock_user_db = UserInDB(
+    id=MOCK_USER_ID,
+    email="test@watttipid.ph",
+    password=MOCK_PASSWORD_HASH,
+    first_name="Maria",
+    last_name="Santos",
+    is_active=True,
+    barangay_city="Cebu City",
+    settings=UserSettings(electricity_rate_php_kwh=12.50),
+)
+
+# API user representation
 mock_user = User(
     id=MOCK_USER_ID,
     email="test@watttipid.ph",
@@ -41,15 +68,28 @@ async def mock_get_current_user():
     return mock_user
 
 
-app.dependency_overrides[get_current_user] = mock_get_current_user
+@pytest.fixture(autouse=True)
+def setup_overrides():
+    """Set overrides and reset mock calls before each test execution"""
+    app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+    app.dependency_overrides[get_refresh_token_repository] = lambda: mock_token_repo
+    app.dependency_overrides[get_appliance_repository] = lambda: mock_appliance_repo
+    app.dependency_overrides[get_monthly_energy_repository] = lambda: mock_energy_repo
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+
+    mock_user_repo.reset_mock()
+    mock_token_repo.reset_mock()
+    mock_appliance_repo.reset_mock()
+    mock_energy_repo.reset_mock()
+    yield
+
+
 client = TestClient(app)
 
 
-@patch("app.services.user_settings_service.redis_client")
-@patch("app.services.user_settings_service.users_collection")
-def test_update_profile_success(mock_users_coll, mock_redis_client):
+def test_update_profile_success():
     """Verify name fields update successfully and trim whitespace"""
-    mock_users_coll.find_one.return_value = mock_user.model_dump()
+    mock_user_repo.get_by_id.return_value = mock_user_db
 
     payload = {"first_name": "  Juan  ", "last_name": "  Dela Cruz  "}
     response = client.patch("/users/profile", json=payload)
@@ -58,17 +98,14 @@ def test_update_profile_success(mock_users_coll, mock_redis_client):
     data = response.json()
     assert data["first_name"] == "Juan"
     assert data["last_name"] == "Dela Cruz"
-    mock_users_coll.update_one.assert_called_once_with(
-        {"id": MOCK_USER_ID},
-        {"$set": {"first_name": "Juan", "last_name": "Dela Cruz"}},
+    mock_user_repo.update_profile.assert_called_once_with(
+        MOCK_USER_ID, "Juan", "Dela Cruz"
     )
-    mock_redis_client.delete.assert_called_once_with(f"user:{MOCK_USER_ID}")
 
 
-@patch("app.services.user_settings_service.users_collection")
-def test_update_email_fails_incorrect_password(mock_users_coll):
+def test_update_email_fails_incorrect_password():
     """Verify email update fails if current password is wrong"""
-    mock_users_coll.find_one.return_value = mock_user.model_dump()
+    mock_user_repo.get_by_id.return_value = mock_user_db
 
     payload = {"current_password": "wrongpassword", "new_email": "new@watttipid.ph"}
     response = client.patch("/users/email", json=payload)
@@ -77,17 +114,10 @@ def test_update_email_fails_incorrect_password(mock_users_coll):
     assert response.json()["detail"] == "Incorrect password"
 
 
-@patch("app.services.user_settings_service.redis_client")
-@patch("app.services.user_settings_service.refresh_tokens_collection")
-@patch("app.services.user_settings_service.users_collection")
-def test_update_email_success_and_revokes_tokens(
-    mock_users_coll, mock_refresh_coll, mock_redis_client
-):
+def test_update_email_success_and_revokes_tokens():
     """Verify email update succeeds with correct password, normalizes email, and revokes tokens"""
-    mock_users_coll.find_one.side_effect = [
-        mock_user.model_dump(),  # 1. when service finds user
-        None,  # 2. when checking email uniqueness (existing=None)
-    ]
+    mock_user_repo.get_by_id.return_value = mock_user_db
+    mock_user_repo.get_by_email.return_value = None  # No user exists with the new email
 
     payload = {
         "current_password": "ValidPassword123!",
@@ -97,24 +127,24 @@ def test_update_email_success_and_revokes_tokens(
 
     assert response.status_code == 200
     assert response.json()["email"] == "new_email@watttipid.ph"
-    mock_users_coll.update_one.assert_called_once_with(
-        {"id": MOCK_USER_ID},
-        {"$set": {"email": "new_email@watttipid.ph"}},
+    mock_user_repo.update_email.assert_called_once_with(
+        MOCK_USER_ID, "new_email@watttipid.ph"
     )
-    mock_refresh_coll.update_many.assert_called_once_with(
-        {"user_id": MOCK_USER_ID, "revoked": False},
-        {"$set": {"revoked": True}},
-    )
-    mock_redis_client.delete.assert_called_once_with(f"user:{MOCK_USER_ID}")
+    mock_token_repo.revoke_all_user_tokens.assert_called_once_with(MOCK_USER_ID)
 
 
-@patch("app.services.user_settings_service.users_collection")
-def test_update_email_enforces_uniqueness(mock_users_coll):
+def test_update_email_enforces_uniqueness():
     """Verify email update fails if new email is already taken by another user"""
-    mock_users_coll.find_one.side_effect = [
-        mock_user.model_dump(),  # 1. when service finds user
-        {"id": "another-user-id"},  # 2. when checking uniqueness (existing user found)
-    ]
+    mock_user_repo.get_by_id.return_value = mock_user_db
+    # Return another user to simulate a collision
+    mock_user_repo.get_by_email.return_value = UserInDB(
+        id="another-user-id",
+        email="taken@watttipid.ph",
+        password="anotherhash",
+        first_name="Juan",
+        last_name="Cruz",
+        barangay_city="Manila",
+    )
 
     payload = {
         "current_password": "ValidPassword123!",
@@ -126,10 +156,9 @@ def test_update_email_enforces_uniqueness(mock_users_coll):
     assert "already registered" in response.json()["detail"]
 
 
-@patch("app.services.user_settings_service.users_collection")
-def test_update_password_fails_incorrect_password(mock_users_coll):
+def test_update_password_fails_incorrect_password():
     """Verify password update fails if current password is wrong"""
-    mock_users_coll.find_one.return_value = mock_user.model_dump()
+    mock_user_repo.get_by_id.return_value = mock_user_db
 
     payload = {
         "current_password": "wrongpassword",
@@ -142,10 +171,9 @@ def test_update_password_fails_incorrect_password(mock_users_coll):
     assert response.json()["detail"] == "Incorrect password"
 
 
-@patch("app.services.user_settings_service.users_collection")
-def test_update_password_fails_complexity_checks(mock_users_coll):
+def test_update_password_fails_complexity_checks():
     """Verify password update fails if new password does not meet complexity constraints"""
-    mock_users_coll.find_one.return_value = mock_user.model_dump()
+    mock_user_repo.get_by_id.return_value = mock_user_db
 
     # 1. Too short
     payload = {
@@ -169,14 +197,9 @@ def test_update_password_fails_complexity_checks(mock_users_coll):
     assert response.status_code == 422
 
 
-@patch("app.services.user_settings_service.redis_client")
-@patch("app.services.user_settings_service.refresh_tokens_collection")
-@patch("app.services.user_settings_service.users_collection")
-def test_update_password_success_and_revokes_tokens(
-    mock_users_coll, mock_refresh_coll, mock_redis_client
-):
+def test_update_password_success_and_revokes_tokens():
     """Verify password update succeeds with complexity check, and revokes tokens"""
-    mock_users_coll.find_one.return_value = mock_user.model_dump()
+    mock_user_repo.get_by_id.return_value = mock_user_db
 
     payload = {
         "current_password": "ValidPassword123!",
@@ -187,26 +210,21 @@ def test_update_password_success_and_revokes_tokens(
 
     assert response.status_code == 200
     assert response.json()["message"] == "Password updated successfully"
-    mock_users_coll.update_one.assert_called_once()
-    mock_refresh_coll.update_many.assert_called_once_with(
-        {"user_id": MOCK_USER_ID, "revoked": False},
-        {"$set": {"revoked": True}},
-    )
-    mock_redis_client.delete.assert_called_once_with(f"user:{MOCK_USER_ID}")
+    mock_user_repo.update_password.assert_called_once()
+    mock_token_repo.revoke_all_user_tokens.assert_called_once_with(MOCK_USER_ID)
 
 
-@patch("app.routers.auth.refresh_tokens_collection")
-def test_protected_endpoints_reject_revoked_refresh_tokens(mock_refresh_coll):
+def test_protected_endpoints_reject_revoked_refresh_tokens():
     """Verify auth refresh rejects revoked refresh tokens after access token expiration"""
-    # Mocking refresh token as revoked
-    mock_refresh_coll.find_one.return_value = {
-        "_id": "token-id",
-        "user_id": MOCK_USER_ID,
-        "token_hash": "somehash",
-        "expires_at": datetime.datetime.now(datetime.timezone.utc)
+    mock_token_repo.get_by_hash.return_value = RefreshTokenInDB(
+        id="token-id",
+        user_id=MOCK_USER_ID,
+        token_hash="somehash",
+        expires_at=datetime.datetime.now(datetime.timezone.utc)
         + datetime.timedelta(days=1),
-        "revoked": True,
-    }
+        revoked=True,
+        created_at=datetime.datetime.now(datetime.timezone.utc),
+    )
 
     response = client.post("/auth/refresh", cookies={"refresh_token": "some-raw-token"})
     assert response.status_code == 401
