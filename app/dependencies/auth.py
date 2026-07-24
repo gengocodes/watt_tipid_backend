@@ -10,6 +10,7 @@ from app.core.config import JWT_SECRET, JWT_ALGORITHM
 from app.database.mongodb import users_collection
 from app.database.redis import redis_client
 from app.schemas.auth import User
+from app.core.logging_config import bind_user_context
 
 
 async def get_current_user(request: Request) -> User:
@@ -28,6 +29,7 @@ async def get_current_user(request: Request) -> User:
         user_id = payload.get("sub")
         if not user_id:
             raise ValueError("sub is missing")
+        bind_user_context(user_id)
 
     except Exception as e:
         raise HTTPException(

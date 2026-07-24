@@ -7,7 +7,8 @@ Tests for endpoints: energy, dashboard, and user settings
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
-# Mock redis_client and MongoClient before any application imports to avoid network connections in CI
+# Mock redis_client and MongoClient before any application 
+# imports to avoid network connections in CI
 import pymongo
 import app.database.redis
 

@@ -3,6 +3,7 @@ Authentication endpoints
 """
 
 import uuid
+import logging
 from typing import Annotated
 from datetime import datetime, timezone, timedelta
 
@@ -24,6 +25,9 @@ from app.core.config import (
     COOKIE_SAMESITE,
 )
 from app.dependencies.auth import get_current_user
+from app.core.logging_config import bind_user_context
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -55,6 +59,8 @@ async def register(data: RegisterRequest):
     )
 
     users_collection.insert_one(user.model_dump())
+    bind_user_context(user_id)
+    logger.info("User registered successfully")
 
     return {"message": "User created", "user_id": user_id}
 
@@ -97,6 +103,8 @@ async def login(data: LoginRequest, response: Response):
         "created_at": datetime.now(timezone.utc),
     }
     refresh_tokens_collection.insert_one(refresh_token_record)
+    bind_user_context(user_id)
+    logger.info("User logged in successfully")
 
     # 3. Set HttpOnly cookies
     response.set_cookie(
@@ -192,6 +200,8 @@ async def refresh(request: Request, response: Response):
         "created_at": datetime.now(timezone.utc),
     }
     refresh_tokens_collection.insert_one(new_refresh_token_record)
+    bind_user_context(user_id)
+    logger.info("Token refreshed successfully")
 
     # 3. Set cookies
     response.set_cookie(
@@ -222,6 +232,12 @@ async def logout(request: Request, response: Response):
     raw_refresh_token = request.cookies.get("refresh_token")
     if raw_refresh_token:
         hashed_refresh_token = hash_token(raw_refresh_token)
+        token_record = refresh_tokens_collection.find_one(
+            {"token_hash": hashed_refresh_token}
+        )
+        if token_record:
+            bind_user_context(token_record["user_id"])
+
         refresh_tokens_collection.update_one(
             {"token_hash": hashed_refresh_token}, {"$set": {"revoked": True}}
         )
@@ -238,6 +254,7 @@ async def logout(request: Request, response: Response):
         samesite=COOKIE_SAMESITE,
     )
 
+    logger.info("User logged out successfully")
     return {"message": "Logged out successfully"}
 
 

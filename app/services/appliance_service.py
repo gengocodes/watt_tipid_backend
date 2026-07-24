@@ -3,12 +3,15 @@ Appliance service layer
 """
 
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 from fastapi import HTTPException, status
 from app.database.mongodb import appliances_collection
 from app.schemas.energy import ApplianceCreate, ApplianceUpdate, ApplianceResponse
 from app.utils.energy_calc import calculate_appliance_kwh
+
+logger = logging.getLogger(__name__)
 
 
 class ApplianceService:
@@ -65,6 +68,7 @@ class ApplianceService:
         }
 
         appliances_collection.insert_one(doc)
+        logger.info("Created appliance '%s' (id: %s)", data.name, app_id)
 
         kwh = calculate_appliance_kwh(data.wattage_watts, data.daily_usage_hours)
         return ApplianceResponse(
@@ -123,6 +127,7 @@ class ApplianceService:
                 detail="Failed to retrieve updated appliance",
             )
 
+        logger.info("Updated appliance '%s' (id: %s)", doc["name"], doc["id"])
         kwh = calculate_appliance_kwh(doc["wattage_watts"], doc["daily_usage_hours"])
         return ApplianceResponse(
             id=doc["id"],
@@ -150,3 +155,4 @@ class ApplianceService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Appliance not found or access denied",
             )
+        logger.info("Deleted appliance (id: %s)", appliance_id)

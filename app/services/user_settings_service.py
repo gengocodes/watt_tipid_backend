@@ -2,6 +2,7 @@
 User settings service layer
 """
 
+import logging
 from fastapi import HTTPException, status
 from app.database.mongodb import users_collection
 from app.schemas.user_settings import (
@@ -18,6 +19,8 @@ from app.database.redis import redis_client
 from app.database.mongodb import refresh_tokens_collection
 from app.core.security import verify_password, hash_password
 from app.core.config import DEFAULT_RATE
+
+logger = logging.getLogger(__name__)
 
 USER_PROFILE_NOT_FOUND = "User profile not found"
 
@@ -60,6 +63,7 @@ class UserSettingsService:
             settings["electricity_rate_php_kwh"] = data.electricity_rate_php_kwh
 
         users_collection.update_one({"id": user_id}, {"$set": {"settings": settings}})
+        logger.info("Updated user settings")
 
         rate = settings.get("electricity_rate_php_kwh", DEFAULT_RATE)
         return UserSettingsResponse(electricity_rate_php_kwh=rate)
@@ -84,6 +88,7 @@ class UserSettingsService:
             {"id": user_id},
             {"$set": {"first_name": first_name, "last_name": last_name}},
         )
+        logger.info("Updated user profile")
 
         await redis_client.delete(f"user:{user_id}")
 
@@ -120,6 +125,7 @@ class UserSettingsService:
                 )
 
         users_collection.update_one({"id": user_id}, {"$set": {"email": new_email}})
+        logger.info("Updated user email address")
 
         # Revoke all active refresh tokens
         refresh_tokens_collection.update_many(
@@ -152,6 +158,7 @@ class UserSettingsService:
         hashed = hash_password(data.new_password)
 
         users_collection.update_one({"id": user_id}, {"$set": {"password": hashed}})
+        logger.info("Updated user password")
 
         # Revoke all active refresh tokens
         refresh_tokens_collection.update_many(
