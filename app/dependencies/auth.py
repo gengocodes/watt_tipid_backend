@@ -4,16 +4,19 @@ Authentication dependencies
 
 from jose import jwt
 
-from fastapi import Request, HTTPException, status
-
+from fastapi import Request, HTTPException, status, Depends
 from app.core.config import JWT_SECRET, JWT_ALGORITHM
-from app.database.mongodb import users_collection
 from app.database.redis import redis_client
 from app.schemas.auth import User
 from app.core.logging_config import bind_user_context
+from app.dependencies.repositories import get_user_repository
+from app.repositories.user import UserRepository
 
 
-async def get_current_user(request: Request) -> User:
+async def get_current_user(
+    request: Request,
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> User:
     """
     Get current user from HttpOnly access_token cookie
     """
@@ -45,14 +48,22 @@ async def get_current_user(request: Request) -> User:
         return User.model_validate_json(cached_user)
 
     # 2. Redis miss -> MongoDB
-    user_doc = users_collection.find_one({"id": user_id})
-    if not user_doc:
+    user_db = user_repo.get_by_id(user_id)
+    if not user_db:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
 
-    user = User(**user_doc)
+    user = User(
+        id=user_db.id,
+        email=user_db.email,
+        password=user_db.password,
+        first_name=user_db.first_name,
+        last_name=user_db.last_name,
+        is_active=user_db.is_active,
+        barangay_city=user_db.barangay_city,
+    )
 
     # 3. Store in Redis for 15 minutes
     await redis_client.set(cache_key, user.model_dump_json(), ex=900)

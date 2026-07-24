@@ -5,6 +5,7 @@ User settings and preferences endpoints
 from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from app.dependencies.auth import get_current_user
+from app.dependencies.services import get_user_settings_service
 from app.schemas.auth import User
 from app.schemas.user_settings import (
     UserSettingsResponse,
@@ -24,9 +25,12 @@ router = APIRouter(prefix="/users", tags=["User Settings"])
 @router.get(
     "/settings", response_model=UserSettingsResponse, status_code=status.HTTP_200_OK
 )
-async def get_settings(current_user: Annotated[User, Depends(get_current_user)]):
+async def get_settings(
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings_service: UserSettingsService = Depends(get_user_settings_service),
+):
     """Retrieve settings and configuration preferences for the authenticated user"""
-    return UserSettingsService.get_settings(current_user.id)
+    return settings_service.get_settings(current_user.id)
 
 
 @router.patch(
@@ -35,9 +39,10 @@ async def get_settings(current_user: Annotated[User, Depends(get_current_user)])
 async def update_settings(
     data: UserSettingsPatchRequest,
     current_user: Annotated[User, Depends(get_current_user)],
+    settings_service: UserSettingsService = Depends(get_user_settings_service),
 ):
     """Partially update user settings preferences"""
-    return UserSettingsService.update_settings(current_user.id, data)
+    return settings_service.update_settings(current_user.id, data)
 
 
 @router.patch(
@@ -46,9 +51,10 @@ async def update_settings(
 async def update_profile(
     data: UserProfileUpdateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
+    settings_service: UserSettingsService = Depends(get_user_settings_service),
 ):
     """Update user first name and last name (no password verify)"""
-    return await UserSettingsService.update_profile(current_user.id, data)
+    return await settings_service.update_profile(current_user.id, data)
 
 
 @router.patch(
@@ -57,9 +63,10 @@ async def update_profile(
 async def update_email(
     data: UserEmailUpdateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
+    settings_service: UserSettingsService = Depends(get_user_settings_service),
 ):
     """Update user email address. Requires current password verification."""
-    return await UserSettingsService.update_email(current_user.id, data)
+    return await settings_service.update_email(current_user.id, data)
 
 
 @router.patch(
@@ -68,6 +75,7 @@ async def update_email(
 async def update_password(
     data: UserPasswordUpdateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
+    settings_service: UserSettingsService = Depends(get_user_settings_service),
 ):
     """Update user password. Requires current password verification."""
-    return await UserSettingsService.update_password(current_user.id, data)
+    return await settings_service.update_password(current_user.id, data)

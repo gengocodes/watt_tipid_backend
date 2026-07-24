@@ -2,9 +2,16 @@
 Dashboard service layer
 """
 
-from app.database.mongodb import appliances_collection, monthly_energy_collection
-from app.schemas.energy import EnergySummaryResponse, CategoryShare, MonthlyTrendItem, ApplianceResponse
-from app.services.user_settings_service import UserSettingsService
+from fastapi import HTTPException, status
+from app.repositories.appliance import ApplianceRepository
+from app.repositories.monthly_energy import MonthlyEnergyRepository
+from app.repositories.user import UserRepository
+from app.schemas.energy import (
+    EnergySummaryResponse,
+    CategoryShare,
+    MonthlyTrendItem,
+    ApplianceResponse,
+)
 from app.utils.energy_calc import (
     calculate_appliance_kwh,
     calculate_saving_score,
@@ -16,35 +23,49 @@ from app.utils.energy_calc import (
 class DashboardService:
     """Orchestrates query and aggregation logic for user energy summaries"""
 
-    @staticmethod
-    def get_dashboard_summary(user_id: str) -> EnergySummaryResponse:
+    def __init__(
+        self,
+        appliance_repo: ApplianceRepository,
+        monthly_energy_repo: MonthlyEnergyRepository,
+        user_repo: UserRepository,
+    ):
+        self.appliance_repo = appliance_repo
+        self.monthly_energy_repo = monthly_energy_repo
+        self.user_repo = user_repo
+
+    def get_dashboard_summary(self, user_id: str) -> EnergySummaryResponse:
         """
         Calculate active projections and retrieve historical snapshot trends.
         Strictly read-only and idempotent.
         """
         # 1. Fetch user's settings (for electricity rate)
-        settings = UserSettingsService.get_settings(user_id)
-        rate = settings.electricity_rate_php_kwh
+        user_db = self.user_repo.get_by_id(user_id)
+        if not user_db:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User profile not found",
+            )
+        rate = user_db.settings.electricity_rate_php_kwh
 
         # 2. Fetch active appliances
-        cursor = appliances_collection.find({"user_id": user_id, "is_active": True})
+        active_appliances = self.appliance_repo.get_active_user_appliances(user_id)
         appliances = [
             ApplianceResponse(
-                id=doc["id"],
-                user_id=doc["user_id"],
-                name=doc["name"],
-                category=doc["category"],
-                wattage_watts=doc["wattage_watts"],
-                daily_usage_hours=doc["daily_usage_hours"],
-                icon=doc["icon"],
-                is_active=doc.get("is_active", True),
+                id=app.id,
+                user_id=app.user_id,
+                name=app.name,
+                category=app.category,
+                wattage_watts=app.wattage_watts,
+                daily_usage_hours=app.daily_usage_hours,
+                icon=app.icon,
+                is_active=app.is_active,
                 monthly_kwh=calculate_appliance_kwh(
-                    doc.get("wattage_watts", 0.0), doc.get("daily_usage_hours", 0.0)
+                    app.wattage_watts, app.daily_usage_hours
                 ),
-                created_at=doc["created_at"],
-                updated_at=doc["updated_at"],
+                created_at=app.created_at,
+                updated_at=app.updated_at,
             )
-            for doc in cursor
+            for app in active_appliances
         ]
 
         # 3. Calculate projections
@@ -64,12 +85,9 @@ class DashboardService:
         ]
 
         # 5. Fetch historical trend logs from monthly_energy
-        trend_cursor = monthly_energy_collection.find({"user_id": user_id}).sort(
-            "month", 1
-        )
+        trends = self.monthly_energy_repo.get_user_trends(user_id)
         monthly_trend = [
-            MonthlyTrendItem(month=doc["month"], kwh=doc["kwh"], cost=doc["cost_php"])
-            for doc in trend_cursor
+            MonthlyTrendItem(month=t.month, kwh=t.kwh, cost=t.cost_php) for t in trends
         ]
 
         # 6. Apply rounding ONLY immediately before return

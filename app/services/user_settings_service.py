@@ -4,7 +4,8 @@ User settings service layer
 
 import logging
 from fastapi import HTTPException, status
-from app.database.mongodb import users_collection
+from app.repositories.user import UserRepository
+from app.repositories.refresh_token import RefreshTokenRepository
 from app.schemas.user_settings import (
     UserSettingsResponse,
     UserSettingsPatchRequest,
@@ -16,9 +17,7 @@ from app.schemas.user_settings import (
     UserPasswordResponse,
 )
 from app.database.redis import redis_client
-from app.database.mongodb import refresh_tokens_collection
 from app.core.security import verify_password, hash_password
-from app.core.config import DEFAULT_RATE
 
 logger = logging.getLogger(__name__)
 
@@ -28,55 +27,55 @@ USER_PROFILE_NOT_FOUND = "User profile not found"
 class UserSettingsService:
     """Handles query and update actions for user configurations"""
 
-    @staticmethod
-    def get_settings(user_id: str) -> UserSettingsResponse:
+    def __init__(
+        self, user_repo: UserRepository, refresh_token_repo: RefreshTokenRepository
+    ):
+        self.user_repo = user_repo
+        self.refresh_token_repo = refresh_token_repo
+
+    def get_settings(self, user_id: str) -> UserSettingsResponse:
         """
         Retrieve settings nested inside the user profile, falling back to defaults.
         """
-        user_doc = users_collection.find_one({"id": user_id})
-        if not user_doc:
+        user_db = self.user_repo.get_by_id(user_id)
+        if not user_db:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=USER_PROFILE_NOT_FOUND
             )
 
-        settings = user_doc.get("settings", {})
-        rate = settings.get("electricity_rate_php_kwh", DEFAULT_RATE)
+        return UserSettingsResponse(
+            electricity_rate_php_kwh=user_db.settings.electricity_rate_php_kwh
+        )
 
-        return UserSettingsResponse(electricity_rate_php_kwh=rate)
-
-    @staticmethod
     def update_settings(
-        user_id: str, data: UserSettingsPatchRequest
+        self, user_id: str, data: UserSettingsPatchRequest
     ) -> UserSettingsResponse:
         """
         Perform a partial update on the user's settings payload.
         """
-        user_doc = users_collection.find_one({"id": user_id})
-        if not user_doc:
+        user_db = self.user_repo.get_by_id(user_id)
+        if not user_db:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=USER_PROFILE_NOT_FOUND
             )
 
-        settings = user_doc.get("settings", {})
-
         if data.electricity_rate_php_kwh is not None:
-            settings["electricity_rate_php_kwh"] = data.electricity_rate_php_kwh
+            self.user_repo.update_settings(user_id, data.electricity_rate_php_kwh)
+            rate = data.electricity_rate_php_kwh
+        else:
+            rate = user_db.settings.electricity_rate_php_kwh
 
-        users_collection.update_one({"id": user_id}, {"$set": {"settings": settings}})
         logger.info("Updated user settings")
-
-        rate = settings.get("electricity_rate_php_kwh", DEFAULT_RATE)
         return UserSettingsResponse(electricity_rate_php_kwh=rate)
 
-    @staticmethod
     async def update_profile(
-        user_id: str, data: UserProfileUpdateRequest
+        self, user_id: str, data: UserProfileUpdateRequest
     ) -> UserProfileResponse:
         """
         Update user first name and last name. Trim whitespace before saving.
         """
-        user_doc = users_collection.find_one({"id": user_id})
-        if not user_doc:
+        user_db = self.user_repo.get_by_id(user_id)
+        if not user_db:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=USER_PROFILE_NOT_FOUND
             )
@@ -84,31 +83,27 @@ class UserSettingsService:
         first_name = data.first_name.strip()
         last_name = data.last_name.strip()
 
-        users_collection.update_one(
-            {"id": user_id},
-            {"$set": {"first_name": first_name, "last_name": last_name}},
-        )
+        self.user_repo.update_profile(user_id, first_name, last_name)
         logger.info("Updated user profile")
 
         await redis_client.delete(f"user:{user_id}")
 
         return UserProfileResponse(first_name=first_name, last_name=last_name)
 
-    @staticmethod
     async def update_email(
-        user_id: str, data: UserEmailUpdateRequest
+        self, user_id: str, data: UserEmailUpdateRequest
     ) -> UserEmailResponse:
         """
         Update user email address. Verifies current password first. Normalizes email.
         Revokes all active/non-expired refresh tokens.
         """
-        user_doc = users_collection.find_one({"id": user_id})
-        if not user_doc:
+        user_db = self.user_repo.get_by_id(user_id)
+        if not user_db:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=USER_PROFILE_NOT_FOUND
             )
 
-        if not verify_password(data.current_password, user_doc["password"]):
+        if not verify_password(data.current_password, user_db.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password"
             )
@@ -116,54 +111,49 @@ class UserSettingsService:
         new_email = data.new_email.strip().lower()
 
         # Check uniqueness if changed
-        if new_email != user_doc.get("email"):
-            existing = users_collection.find_one({"email": new_email})
+        if new_email != user_db.email:
+            existing = self.user_repo.get_by_email(new_email)
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Email already registered",
                 )
 
-        users_collection.update_one({"id": user_id}, {"$set": {"email": new_email}})
+        self.user_repo.update_email(user_id, new_email)
         logger.info("Updated user email address")
 
         # Revoke all active refresh tokens
-        refresh_tokens_collection.update_many(
-            {"user_id": user_id, "revoked": False}, {"$set": {"revoked": True}}
-        )
+        self.refresh_token_repo.revoke_all_user_tokens(user_id)
 
         await redis_client.delete(f"user:{user_id}")
 
         return UserEmailResponse(email=new_email)
 
-    @staticmethod
     async def update_password(
-        user_id: str, data: UserPasswordUpdateRequest
+        self, user_id: str, data: UserPasswordUpdateRequest
     ) -> UserPasswordResponse:
         """
         Update user password. Verifies current password first.
         Revokes all active/non-expired refresh tokens.
         """
-        user_doc = users_collection.find_one({"id": user_id})
-        if not user_doc:
+        user_db = self.user_repo.get_by_id(user_id)
+        if not user_db:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=USER_PROFILE_NOT_FOUND
             )
 
-        if not verify_password(data.current_password, user_doc["password"]):
+        if not verify_password(data.current_password, user_db.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password"
             )
 
         hashed = hash_password(data.new_password)
 
-        users_collection.update_one({"id": user_id}, {"$set": {"password": hashed}})
+        self.user_repo.update_password(user_id, hashed)
         logger.info("Updated user password")
 
         # Revoke all active refresh tokens
-        refresh_tokens_collection.update_many(
-            {"user_id": user_id, "revoked": False}, {"$set": {"revoked": True}}
-        )
+        self.refresh_token_repo.revoke_all_user_tokens(user_id)
 
         await redis_client.delete(f"user:{user_id}")
 

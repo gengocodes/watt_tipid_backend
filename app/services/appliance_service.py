@@ -5,9 +5,10 @@ Appliance service layer
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import List, Dict, Any
+from typing import List
 from fastapi import HTTPException, status
-from app.database.mongodb import appliances_collection
+from app.repositories.appliance import ApplianceRepository
+from app.database.models import ApplianceInDB
 from app.schemas.energy import ApplianceCreate, ApplianceUpdate, ApplianceResponse
 from app.utils.energy_calc import calculate_appliance_kwh
 
@@ -17,57 +18,58 @@ logger = logging.getLogger(__name__)
 class ApplianceService:
     """Handles CRUD queries and business logic for appliances"""
 
-    @staticmethod
-    def get_appliances(user_id: str) -> List[ApplianceResponse]:
+    def __init__(self, appliance_repo: ApplianceRepository):
+        self.appliance_repo = appliance_repo
+
+    def get_appliances(self, user_id: str) -> List[ApplianceResponse]:
         """
         Retrieve all appliances belonging to the authenticated user.
         Calculates monthly_kwh on the fly.
         """
-        cursor = appliances_collection.find({"user_id": user_id})
+        appliances = self.appliance_repo.get_user_appliances(user_id)
         result = []
-        for doc in cursor:
-            kwh = calculate_appliance_kwh(
-                doc.get("wattage_watts", 0.0), doc.get("daily_usage_hours", 0.0)
-            )
+        for app in appliances:
+            kwh = calculate_appliance_kwh(app.wattage_watts, app.daily_usage_hours)
             result.append(
                 ApplianceResponse(
-                    id=doc["id"],
-                    user_id=doc["user_id"],
-                    name=doc["name"],
-                    category=doc["category"],
-                    wattage_watts=doc["wattage_watts"],
-                    daily_usage_hours=doc["daily_usage_hours"],
-                    icon=doc["icon"],
-                    is_active=doc.get("is_active", True),
+                    id=app.id,
+                    user_id=app.user_id,
+                    name=app.name,
+                    category=app.category,
+                    wattage_watts=app.wattage_watts,
+                    daily_usage_hours=app.daily_usage_hours,
+                    icon=app.icon,
+                    is_active=app.is_active,
                     monthly_kwh=kwh,
-                    created_at=doc["created_at"],
-                    updated_at=doc["updated_at"],
+                    created_at=app.created_at,
+                    updated_at=app.updated_at,
                 )
             )
         return result
 
-    @staticmethod
-    def create_appliance(user_id: str, data: ApplianceCreate) -> ApplianceResponse:
+    def create_appliance(
+        self, user_id: str, data: ApplianceCreate
+    ) -> ApplianceResponse:
         """
         Register a new appliance in the database.
         """
         app_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
 
-        doc = {
-            "id": app_id,
-            "user_id": user_id,
-            "name": data.name,
-            "category": data.category,
-            "wattage_watts": data.wattage_watts,
-            "daily_usage_hours": data.daily_usage_hours,
-            "icon": data.icon,
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now,
-        }
+        app = ApplianceInDB(
+            id=app_id,
+            user_id=user_id,
+            name=data.name,
+            category=data.category,
+            wattage_watts=data.wattage_watts,
+            daily_usage_hours=data.daily_usage_hours,
+            icon=data.icon,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
 
-        appliances_collection.insert_one(doc)
+        self.appliance_repo.create_appliance(app)
         logger.info("Created appliance '%s' (id: %s)", data.name, app_id)
 
         kwh = calculate_appliance_kwh(data.wattage_watts, data.daily_usage_hours)
@@ -85,72 +87,52 @@ class ApplianceService:
             updated_at=now,
         )
 
-    @staticmethod
     def update_appliance(
-        user_id: str, appliance_id: str, data: ApplianceUpdate
+        self, user_id: str, appliance_id: str, data: ApplianceUpdate
     ) -> ApplianceResponse:
         """
         Update an appliance configuration after verifying ownership.
         """
-        query = {"id": appliance_id, "user_id": user_id}
-        existing = appliances_collection.find_one(query)
+        existing = self.appliance_repo.get_by_id_and_user(appliance_id, user_id)
         if not existing:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Appliance not found or access denied",
             )
 
-        update_fields: Dict[str, Any] = {}
-        if data.name is not None:
-            update_fields["name"] = data.name
-        if data.category is not None:
-            update_fields["category"] = data.category
-        if data.wattage_watts is not None:
-            update_fields["wattage_watts"] = data.wattage_watts
-        if data.daily_usage_hours is not None:
-            update_fields["daily_usage_hours"] = data.daily_usage_hours
-        if data.icon is not None:
-            update_fields["icon"] = data.icon
-        if data.is_active is not None:
-            update_fields["is_active"] = data.is_active
-
-        update_fields["updated_at"] = datetime.now(timezone.utc)
-
-        appliances_collection.update_one(query, {"$set": update_fields})
+        self.appliance_repo.update_appliance(appliance_id, user_id, data)
 
         # Fetch updated doc
-        doc = appliances_collection.find_one(query)
+        updated = self.appliance_repo.get_by_id_and_user(appliance_id, user_id)
         # Ensure it exists
-        if not doc:
+        if not updated:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve updated appliance",
             )
 
-        logger.info("Updated appliance '%s' (id: %s)", doc["name"], doc["id"])
-        kwh = calculate_appliance_kwh(doc["wattage_watts"], doc["daily_usage_hours"])
+        logger.info("Updated appliance '%s' (id: %s)", updated.name, updated.id)
+        kwh = calculate_appliance_kwh(updated.wattage_watts, updated.daily_usage_hours)
         return ApplianceResponse(
-            id=doc["id"],
-            user_id=doc["user_id"],
-            name=doc["name"],
-            category=doc["category"],
-            wattage_watts=doc["wattage_watts"],
-            daily_usage_hours=doc["daily_usage_hours"],
-            icon=doc["icon"],
-            is_active=doc.get("is_active", True),
+            id=updated.id,
+            user_id=updated.user_id,
+            name=updated.name,
+            category=updated.category,
+            wattage_watts=updated.wattage_watts,
+            daily_usage_hours=updated.daily_usage_hours,
+            icon=updated.icon,
+            is_active=updated.is_active,
             monthly_kwh=kwh,
-            created_at=doc["created_at"],
-            updated_at=doc["updated_at"],
+            created_at=updated.created_at,
+            updated_at=updated.updated_at,
         )
 
-    @staticmethod
-    def delete_appliance(user_id: str, appliance_id: str) -> None:
+    def delete_appliance(self, user_id: str, appliance_id: str) -> None:
         """
         Delete an appliance after verifying ownership.
         """
-        query = {"id": appliance_id, "user_id": user_id}
-        result = appliances_collection.delete_one(query)
-        if result.deleted_count == 0:
+        success = self.appliance_repo.delete_appliance(appliance_id, user_id)
+        if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Appliance not found or access denied",
