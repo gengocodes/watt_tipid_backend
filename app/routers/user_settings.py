@@ -48,7 +48,7 @@ async def update_profile(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Update user first name and last name (no password verify)"""
-    return UserSettingsService.update_profile(current_user.id, data)
+    return await UserSettingsService.update_profile(current_user.id, data)
 
 
 @router.patch(
@@ -59,7 +59,7 @@ async def update_email(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Update user email address. Requires current password verification."""
-    return UserSettingsService.update_email(current_user.id, data)
+    return await UserSettingsService.update_email(current_user.id, data)
 
 
 @router.patch(
@@ -70,4 +70,4 @@ async def update_password(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Update user password. Requires current password verification."""
-    return UserSettingsService.update_password(current_user.id, data)
+    return await UserSettingsService.update_password(current_user.id, data)

@@ -45,8 +45,9 @@ app.dependency_overrides[get_current_user] = mock_get_current_user
 client = TestClient(app)
 
 
+@patch("app.services.user_settings_service.redis_client")
 @patch("app.services.user_settings_service.users_collection")
-def test_update_profile_success(mock_users_coll):
+def test_update_profile_success(mock_users_coll, mock_redis_client):
     """Verify name fields update successfully and trim whitespace"""
     mock_users_coll.find_one.return_value = mock_user.model_dump()
 
@@ -61,6 +62,7 @@ def test_update_profile_success(mock_users_coll):
         {"id": MOCK_USER_ID},
         {"$set": {"first_name": "Juan", "last_name": "Dela Cruz"}},
     )
+    mock_redis_client.delete.assert_called_once_with(f"user:{MOCK_USER_ID}")
 
 
 @patch("app.services.user_settings_service.users_collection")
@@ -75,9 +77,12 @@ def test_update_email_fails_incorrect_password(mock_users_coll):
     assert response.json()["detail"] == "Incorrect password"
 
 
+@patch("app.services.user_settings_service.redis_client")
 @patch("app.services.user_settings_service.refresh_tokens_collection")
 @patch("app.services.user_settings_service.users_collection")
-def test_update_email_success_and_revokes_tokens(mock_users_coll, mock_refresh_coll):
+def test_update_email_success_and_revokes_tokens(
+    mock_users_coll, mock_refresh_coll, mock_redis_client
+):
     """Verify email update succeeds with correct password, normalizes email, and revokes tokens"""
     mock_users_coll.find_one.side_effect = [
         mock_user.model_dump(),  # 1. when service finds user
@@ -100,6 +105,7 @@ def test_update_email_success_and_revokes_tokens(mock_users_coll, mock_refresh_c
         {"user_id": MOCK_USER_ID, "revoked": False},
         {"$set": {"revoked": True}},
     )
+    mock_redis_client.delete.assert_called_once_with(f"user:{MOCK_USER_ID}")
 
 
 @patch("app.services.user_settings_service.users_collection")
@@ -163,9 +169,12 @@ def test_update_password_fails_complexity_checks(mock_users_coll):
     assert response.status_code == 422
 
 
+@patch("app.services.user_settings_service.redis_client")
 @patch("app.services.user_settings_service.refresh_tokens_collection")
 @patch("app.services.user_settings_service.users_collection")
-def test_update_password_success_and_revokes_tokens(mock_users_coll, mock_refresh_coll):
+def test_update_password_success_and_revokes_tokens(
+    mock_users_coll, mock_refresh_coll, mock_redis_client
+):
     """Verify password update succeeds with complexity check, and revokes tokens"""
     mock_users_coll.find_one.return_value = mock_user.model_dump()
 
@@ -183,6 +192,7 @@ def test_update_password_success_and_revokes_tokens(mock_users_coll, mock_refres
         {"user_id": MOCK_USER_ID, "revoked": False},
         {"$set": {"revoked": True}},
     )
+    mock_redis_client.delete.assert_called_once_with(f"user:{MOCK_USER_ID}")
 
 
 @patch("app.routers.auth.refresh_tokens_collection")

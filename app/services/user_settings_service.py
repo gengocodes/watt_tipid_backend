@@ -14,6 +14,7 @@ from app.schemas.user_settings import (
     UserPasswordUpdateRequest,
     UserPasswordResponse,
 )
+from app.database.redis import redis_client
 from app.database.mongodb import refresh_tokens_collection
 from app.core.security import verify_password, hash_password
 from app.core.config import DEFAULT_RATE
@@ -64,7 +65,7 @@ class UserSettingsService:
         return UserSettingsResponse(electricity_rate_php_kwh=rate)
 
     @staticmethod
-    def update_profile(
+    async def update_profile(
         user_id: str, data: UserProfileUpdateRequest
     ) -> UserProfileResponse:
         """
@@ -84,10 +85,14 @@ class UserSettingsService:
             {"$set": {"first_name": first_name, "last_name": last_name}},
         )
 
+        await redis_client.delete(f"user:{user_id}")
+
         return UserProfileResponse(first_name=first_name, last_name=last_name)
 
     @staticmethod
-    def update_email(user_id: str, data: UserEmailUpdateRequest) -> UserEmailResponse:
+    async def update_email(
+        user_id: str, data: UserEmailUpdateRequest
+    ) -> UserEmailResponse:
         """
         Update user email address. Verifies current password first. Normalizes email.
         Revokes all active/non-expired refresh tokens.
@@ -121,10 +126,12 @@ class UserSettingsService:
             {"user_id": user_id, "revoked": False}, {"$set": {"revoked": True}}
         )
 
+        await redis_client.delete(f"user:{user_id}")
+
         return UserEmailResponse(email=new_email)
 
     @staticmethod
-    def update_password(
+    async def update_password(
         user_id: str, data: UserPasswordUpdateRequest
     ) -> UserPasswordResponse:
         """
@@ -150,5 +157,7 @@ class UserSettingsService:
         refresh_tokens_collection.update_many(
             {"user_id": user_id, "revoked": False}, {"$set": {"revoked": True}}
         )
+
+        await redis_client.delete(f"user:{user_id}")
 
         return UserPasswordResponse(message="Password updated successfully")
