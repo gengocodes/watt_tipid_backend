@@ -2,18 +2,26 @@
 WattTipid API
 """
 
+import logging
 from typing import Any, Dict
 from fastapi import (
     FastAPI,
     Response,
+    Request,
     status,
 )
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import auth, energy, dashboard, user_settings
 from app.database.redis import redis_client
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.core.config import ENV
+from app.core.logging_config import setup_logging
+from app.middleware.logging_middleware import LoggingContextMiddleware
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 is_dev = ENV == "dev"
 
@@ -41,7 +49,11 @@ app.include_router(auth.router)
 app.include_router(energy.router)
 app.include_router(dashboard.router)
 app.include_router(user_settings.router)
+
+# LoggingContextMiddleware wraps RateLimitMiddleware
+# to ensure logging context is set during its execution
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(LoggingContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -52,6 +64,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global handler for unexpected server exceptions.
+    """
+    logger.exception(
+        "Unhandled server error occurred during %s %s %s",
+        request.method,
+        request.url.path,
+        str(exc),
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal Server Error"},
+    )
 
 
 @app.get("/health")
