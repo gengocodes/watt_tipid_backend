@@ -26,6 +26,10 @@ from app.dependencies.repositories import (
     get_refresh_token_repository,
 )
 from app.core.security import hash_token
+from app.services.email_service import EmailService
+
+# Mock EmailService globally to prevent outbound SMTP connections in tests
+EmailService.send_verification_email = MagicMock()
 
 # Setup mock repositories
 mock_user_repo = MagicMock()

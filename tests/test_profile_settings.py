@@ -26,6 +26,11 @@ from app.dependencies.auth import get_current_user
 from app.schemas.auth import User
 from app.database.models import UserInDB, RefreshTokenInDB, UserSettings
 from app.core.security import hash_password, hash_token
+from app.services.email_service import EmailService
+
+# Mock EmailService globally to prevent outbound SMTP connections in tests
+EmailService.send_verification_email = MagicMock()
+
 from app.dependencies.repositories import (
     get_user_repository,
     get_refresh_token_repository,
