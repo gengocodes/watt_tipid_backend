@@ -63,6 +63,7 @@ async def get_current_user(
         last_name=user_db.last_name,
         is_active=user_db.is_active,
         barangay_city=user_db.barangay_city,
+        created_at=user_db.created_at,
     )
 
     # 3. Store in Redis for 15 minutes

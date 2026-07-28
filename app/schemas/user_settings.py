@@ -79,3 +79,9 @@ class UserPasswordResponse(BaseModel):
     """Outbound password update confirmation"""
 
     message: str
+
+
+class UserEmailVerifyRequest(BaseModel):
+    """Email update verification code request"""
+
+    code: str = Field(..., description="6-digit verification code")

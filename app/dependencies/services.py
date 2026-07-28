@@ -18,14 +18,21 @@ from app.services.auth_service import AuthService
 from app.services.appliance_service import ApplianceService
 from app.services.dashboard_service import DashboardService
 from app.services.user_settings_service import UserSettingsService
+from app.services.email_service import EmailService
+
+
+def get_email_service() -> EmailService:
+    """Dependency provider for EmailService"""
+    return EmailService()
 
 
 def get_auth_service(
     user_repo: UserRepository = Depends(get_user_repository),
     token_repo: RefreshTokenRepository = Depends(get_refresh_token_repository),
+    email_service: EmailService = Depends(get_email_service),
 ) -> AuthService:
     """Dependency provider for AuthService"""
-    return AuthService(user_repo, token_repo)
+    return AuthService(user_repo, token_repo, email_service)
 
 
 def get_appliance_service(
@@ -47,6 +54,7 @@ def get_dashboard_service(
 def get_user_settings_service(
     user_repo: UserRepository = Depends(get_user_repository),
     token_repo: RefreshTokenRepository = Depends(get_refresh_token_repository),
+    email_service: EmailService = Depends(get_email_service),
 ) -> UserSettingsService:
     """Dependency provider for UserSettingsService"""
-    return UserSettingsService(user_repo, token_repo)
+    return UserSettingsService(user_repo, token_repo, email_service)

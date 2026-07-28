@@ -4,9 +4,11 @@ Auth service layer containing authentication business logic.
 
 import uuid
 import logging
+import json
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, BackgroundTasks
 
 from app.database.models import UserInDB, RefreshTokenInDB
 from app.repositories.user import UserRepository
@@ -19,8 +21,15 @@ from app.core.security import (
     generate_refresh_token,
     hash_token,
 )
-from app.core.config import REFRESH_TOKEN_EXPIRE_DAYS
+from app.core.config import (
+    REFRESH_TOKEN_EXPIRE_DAYS,
+    EMAIL_VERIFICATION_EXPIRE_MINUTES,
+    EMAIL_VERIFICATION_RESEND_SECONDS,
+    EMAIL_VERIFICATION_MAX_ATTEMPTS,
+)
 from app.core.logging_config import bind_user_context
+from app.database.redis import redis_client
+from app.services.email_service import EmailService
 
 logger = logging.getLogger(__name__)
 
@@ -29,35 +38,183 @@ class AuthService:
     """Handles registrations, logins, token rotation, and logs"""
 
     def __init__(
-        self, user_repo: UserRepository, refresh_token_repo: RefreshTokenRepository
+        self,
+        user_repo: UserRepository,
+        refresh_token_repo: RefreshTokenRepository,
+        email_service: EmailService,
     ):
         self.user_repo = user_repo
         self.refresh_token_repo = refresh_token_repo
+        self.email_service = email_service
 
-    def register(self, data: RegisterRequest) -> str:
-        """Register a new user in the database"""
-        existing_user = self.user_repo.get_by_email(data.email)
+    async def register(
+        self, data: RegisterRequest, background_tasks: BackgroundTasks
+    ) -> str:
+        """Stash registration info in Redis and send verification code"""
+        normalized_email = data.email.strip().lower()
+        existing_user = self.user_repo.get_by_email(normalized_email)
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered",
             )
 
+        data_key = f"register:data:{normalized_email}"
+        code_key = f"register:code:{normalized_email}"
+        cooldown_key = f"register:cooldown:{normalized_email}"
+
+        # Hash password and prepare user details payload
+        pending_data = {
+            "email": normalized_email,
+            "password_hash": hash_password(data.password),
+            "first_name": data.first_name,
+            "last_name": data.last_name,
+            "barangay_city": data.barangay_city,
+        }
+        pending_data_json = json.dumps(pending_data)
+
+        # Atomic SETNX with expiration (5 minutes)
+        ttl_seconds = EMAIL_VERIFICATION_EXPIRE_MINUTES * 60
+        success = await redis_client.set(
+            data_key, pending_data_json, ex=ttl_seconds, nx=True
+        )
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Verification already pending.",
+            )
+
+        # Generate, hash, and store verification code
+        code = "".join(secrets.choice("0123456789") for _ in range(6))
+        code_hash = hash_token(code)
+        pending_code = {
+            "code_hash": code_hash,
+            "attempts": 0,
+        }
+        await redis_client.set(code_key, json.dumps(pending_code), ex=ttl_seconds)
+
+        # Set resend cooldown (60 seconds)
+        await redis_client.set(cooldown_key, "1", ex=EMAIL_VERIFICATION_RESEND_SECONDS)
+
+        # Schedule async email delivery
+        background_tasks.add_task(
+            self.email_service.send_verification_email,
+            normalized_email,
+            code,
+            "register",
+        )
+
+        logger.info("Initiated registration verification flow for %s", normalized_email)
+        return normalized_email
+
+    async def verify_register(self, email: str, code: str) -> str:
+        """Verify the registration code, commit the user to DB, and delete Redis keys"""
+        normalized_email = email.strip().lower()
+        code_key = f"register:code:{normalized_email}"
+        data_key = f"register:data:{normalized_email}"
+        cooldown_key = f"register:cooldown:{normalized_email}"
+
+        code_data_json = await redis_client.get(code_key)
+        if not code_data_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Verification code expired or not found. Please register again.",
+            )
+
+        code_data = json.loads(code_data_json)
+        if code_data["attempts"] >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            await redis_client.delete(code_key, data_key, cooldown_key)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many failed attempts. Please register again.",
+            )
+
+        hashed_input = hash_token(code.strip())
+        if code_data["code_hash"] != hashed_input:
+            code_data["attempts"] += 1
+            remaining = EMAIL_VERIFICATION_MAX_ATTEMPTS - code_data["attempts"]
+            if remaining <= 0:
+                await redis_client.delete(code_key, data_key, cooldown_key)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Too many failed attempts. Please register again.",
+                )
+            ttl = await redis_client.ttl(code_key)
+            if ttl > 0:
+                await redis_client.set(code_key, json.dumps(code_data), ex=ttl)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid verification code. {remaining} attempt(s) remaining.",
+            )
+
+        # Code is correct, retrieve user registration payload
+        data_json = await redis_client.get(data_key)
+        if not data_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Registration session expired. Please register again.",
+            )
+
+        reg_data = json.loads(data_json)
         user_id = str(uuid.uuid4())
         user_db = UserInDB(
             id=user_id,
-            email=data.email,
-            password=hash_password(data.password),
-            first_name=data.first_name,
-            last_name=data.last_name,
+            email=reg_data["email"],
+            password=reg_data["password_hash"],
+            first_name=reg_data["first_name"],
+            last_name=reg_data["last_name"],
             is_active=True,
-            barangay_city=data.barangay_city,
+            barangay_city=reg_data["barangay_city"],
+            email_verified_at=datetime.now(timezone.utc),
         )
 
         self.user_repo.create_user(user_db)
+        await redis_client.delete(code_key, data_key, cooldown_key)
+
         bind_user_context(user_id)
-        logger.info("User registered successfully")
+        logger.info("User %s verified and created successfully", normalized_email)
         return user_id
+
+    async def resend_register_code(
+        self, email: str, background_tasks: BackgroundTasks
+    ) -> None:
+        """Resend registration code if cooldown timer has elapsed"""
+        normalized_email = email.strip().lower()
+        cooldown_key = f"register:cooldown:{normalized_email}"
+        cooldown_exists = await redis_client.get(cooldown_key)
+        if cooldown_exists:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Please wait before requesting another code.",
+            )
+
+        data_key = f"register:data:{normalized_email}"
+        data_exists = await redis_client.exists(data_key)
+        if not data_exists:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Registration session expired. Please register again.",
+            )
+
+        code = "".join(secrets.choice("0123456789") for _ in range(6))
+        code_hash = hash_token(code)
+        pending_code = {
+            "code_hash": code_hash,
+            "attempts": 0,
+        }
+
+        ttl_seconds = EMAIL_VERIFICATION_EXPIRE_MINUTES * 60
+        code_key = f"register:code:{normalized_email}"
+        await redis_client.set(code_key, json.dumps(pending_code), ex=ttl_seconds)
+        await redis_client.set(cooldown_key, "1", ex=EMAIL_VERIFICATION_RESEND_SECONDS)
+
+        background_tasks.add_task(
+            self.email_service.send_verification_email,
+            normalized_email,
+            code,
+            "register",
+        )
+        logger.info("Resent registration verification code to %s", normalized_email)
 
     def login(self, data: LoginRequest) -> Tuple[UserResponse, str, str]:
         """Authenticate user credentials and generate access/refresh tokens"""
@@ -96,6 +253,7 @@ class AuthService:
             first_name=user_db.first_name,
             last_name=user_db.last_name,
             barangay_city=user_db.barangay_city,
+            created_at=user_db.created_at,
         )
 
         return response_user, access_token, raw_refresh_token

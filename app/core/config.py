@@ -23,6 +23,20 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
 DEFAULT_RATE = float(os.getenv("DEFAULT_RATE", "12.50"))
 
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "WattTipid")
+
+EMAIL_VERIFICATION_EXPIRE_MINUTES = int(
+    os.getenv("EMAIL_VERIFICATION_EXPIRE_MINUTES", "5")
+)
+EMAIL_VERIFICATION_RESEND_SECONDS = int(
+    os.getenv("EMAIL_VERIFICATION_RESEND_SECONDS", "60")
+)
+EMAIL_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("EMAIL_VERIFICATION_MAX_ATTEMPTS", "3"))
+
 COOKIE_SECURE: bool
 COOKIE_SAMESITE: Literal["lax", "strict", "none"]
 

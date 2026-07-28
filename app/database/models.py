@@ -2,7 +2,7 @@
 Database models representing BSON structures stored in MongoDB.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel, Field
 from app.core.config import DEFAULT_RATE
@@ -31,9 +31,16 @@ class UserInDB(BaseModel):
         default=True, description="Whether the user account is active"
     )
     barangay_city: str = Field(..., description="User's location")
+    email_verified_at: Optional[datetime] = Field(
+        default=None, description="UTC email verification time"
+    )
     settings: UserSettings = Field(
         default_factory=UserSettings,
         description="User configuration settings",
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description=CREATED_AT_DESC,
     )
 
 
