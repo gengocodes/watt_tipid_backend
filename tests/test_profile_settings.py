@@ -20,7 +20,7 @@ if not isinstance(app.database.redis.redis_client, AsyncMock):
 app.database.redis.redis_client.incr.return_value = 1
 app.database.redis.redis_client.expire.return_value = True
 
-from app.database.redis import redis_client
+redis_client = app.database.redis.redis_client
 from app.main import app
 from app.dependencies.auth import get_current_user
 from app.schemas.auth import User
