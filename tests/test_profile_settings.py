@@ -4,7 +4,8 @@ Tests for user settings profile, email, and password update endpoints using repo
 
 # pylint: disable=wrong-import-position
 
-import datetime
+import json
+from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
@@ -14,15 +15,22 @@ import pymongo
 import app.database.redis
 
 pymongo.MongoClient = MagicMock()
-app.database.redis.redis_client = AsyncMock()
+if not isinstance(app.database.redis.redis_client, AsyncMock):
+    app.database.redis.redis_client = AsyncMock()
 app.database.redis.redis_client.incr.return_value = 1
 app.database.redis.redis_client.expire.return_value = True
 
+redis_client = app.database.redis.redis_client
 from app.main import app
 from app.dependencies.auth import get_current_user
 from app.schemas.auth import User
 from app.database.models import UserInDB, RefreshTokenInDB, UserSettings
-from app.core.security import hash_password
+from app.core.security import hash_password, hash_token
+from app.services.email_service import EmailService
+
+# Mock EmailService globally to prevent outbound SMTP connections in tests
+EmailService.send_verification_email = MagicMock()
+
 from app.dependencies.repositories import (
     get_user_repository,
     get_refresh_token_repository,
@@ -60,6 +68,7 @@ mock_user = User(
     last_name="Santos",
     is_active=True,
     barangay_city="Cebu City",
+    created_at=datetime.now(timezone.utc),
 )
 
 
@@ -81,6 +90,10 @@ def setup_overrides():
     mock_token_repo.reset_mock()
     mock_appliance_repo.reset_mock()
     mock_energy_repo.reset_mock()
+    
+    redis_client.get.side_effect = None
+    redis_client.get.return_value = None
+    redis_client.get.reset_mock()
     yield
 
 
@@ -114,8 +127,8 @@ def test_update_email_fails_incorrect_password():
     assert response.json()["detail"] == "Incorrect password"
 
 
-def test_update_email_success_and_revokes_tokens():
-    """Verify email update succeeds with correct password, normalizes email, and revokes tokens"""
+def test_update_email_success_and_stashes_in_redis():
+    """Verify email update request succeeds with correct password, normalizes email, and stashes in Redis"""
     mock_user_repo.get_by_id.return_value = mock_user_db
     mock_user_repo.get_by_email.return_value = None  # No user exists with the new email
 
@@ -125,6 +138,31 @@ def test_update_email_success_and_revokes_tokens():
     }
     response = client.patch("/users/email", json=payload)
 
+    assert response.status_code == 200
+    assert response.json()["email"] == "new_email@watttipid.ph"
+    mock_user_repo.update_email.assert_not_called()
+    mock_token_repo.revoke_all_user_tokens.assert_not_called()
+
+
+def test_verify_email_change_success():
+    """Verify email verification succeeds, updates DB, and revokes tokens"""
+    code = "123456"
+    hashed_code = hash_token(code)
+    
+    mock_user_repo.get_by_email.return_value = None
+    
+    async def mock_redis_get(key):
+        if key == f"email_change:data:{MOCK_USER_ID}":
+            return json.dumps({"new_email": "new_email@watttipid.ph"})
+        if key == f"email_change:code:{MOCK_USER_ID}":
+            return json.dumps({"code_hash": hashed_code, "attempts": 0})
+        return None
+        
+    redis_client.get.side_effect = mock_redis_get
+    
+    payload = {"code": code}
+    response = client.post("/users/email/verify", json=payload)
+    
     assert response.status_code == 200
     assert response.json()["email"] == "new_email@watttipid.ph"
     mock_user_repo.update_email.assert_called_once_with(
@@ -220,10 +258,10 @@ def test_protected_endpoints_reject_revoked_refresh_tokens():
         id="token-id",
         user_id=MOCK_USER_ID,
         token_hash="somehash",
-        expires_at=datetime.datetime.now(datetime.timezone.utc)
-        + datetime.timedelta(days=1),
+        expires_at=datetime.now(timezone.utc)
+        + timedelta(days=1),
         revoked=True,
-        created_at=datetime.datetime.now(datetime.timezone.utc),
+        created_at=datetime.now(timezone.utc),
     )
 
     response = client.post("/auth/refresh", cookies={"refresh_token": "some-raw-token"})

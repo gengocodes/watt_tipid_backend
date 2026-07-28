@@ -3,9 +3,24 @@ Authentication endpoints
 """
 
 from typing import Annotated
-from fastapi import APIRouter, HTTPException, status, Response, Request, Depends
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    status,
+    Response,
+    Request,
+    Depends,
+    BackgroundTasks,
+)
 
-from app.schemas.auth import RegisterRequest, LoginRequest, UserResponse, User
+from app.schemas.auth import (
+    RegisterRequest,
+    LoginRequest,
+    UserResponse,
+    User,
+    RegisterVerifyRequest,
+    RegisterResendRequest,
+)
 from app.core.config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     REFRESH_TOKEN_EXPIRE_DAYS,
@@ -21,19 +36,56 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post(
     "/register",
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_200_OK,
     responses={
-        400: {"description": "Email already registered"},
+        400: {
+            "description": "Email already registered or verification already pending"
+        },
         429: {"description": "Rate limit exceeded"},
     },
 )
 async def register(
     data: RegisterRequest,
+    background_tasks: BackgroundTasks,
     auth_service: AuthService = Depends(get_auth_service),
 ):
-    """Register a new user"""
-    user_id = auth_service.register(data)
-    return {"message": "User created", "user_id": user_id}
+    """Register a new user (initiates email verification flow)"""
+    email = await auth_service.register(data, background_tasks)
+    return {"message": "Verification code sent", "email": email}
+
+
+@router.post(
+    "/register/verify",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        400: {"description": "Invalid code, expired code, or max attempts exceeded"},
+    },
+)
+async def register_verify(
+    data: RegisterVerifyRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """Verify registration code and commit user creation"""
+    user_id = await auth_service.verify_register(data.email, data.code)
+    return {"message": "Registration successful", "user_id": user_id}
+
+
+@router.post(
+    "/register/resend",
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"description": "Registration session expired"},
+        429: {"description": "Cooldown active"},
+    },
+)
+async def register_resend(
+    data: RegisterResendRequest,
+    background_tasks: BackgroundTasks,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """Resend registration verification code"""
+    await auth_service.resend_register_code(data.email, background_tasks)
+    return {"message": "Verification code resent"}
 
 
 @router.post(
@@ -155,4 +207,5 @@ async def me(current_user: Annotated[User, Depends(get_current_user)]):
         first_name=current_user.first_name,
         last_name=current_user.last_name,
         barangay_city=current_user.barangay_city,
+        created_at=current_user.created_at,
     )

@@ -15,7 +15,8 @@ import pymongo
 import app.database.redis
 
 pymongo.MongoClient = MagicMock()
-app.database.redis.redis_client = AsyncMock()
+if not isinstance(app.database.redis.redis_client, AsyncMock):
+    app.database.redis.redis_client = AsyncMock()
 app.database.redis.redis_client.incr.return_value = 1
 app.database.redis.redis_client.expire.return_value = True
 
@@ -47,6 +48,7 @@ mock_user = User(
     last_name="Santos",
     is_active=True,
     barangay_city="Cebu City",
+    created_at=datetime.now(timezone.utc),
 )
 
 
