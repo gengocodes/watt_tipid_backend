@@ -19,6 +19,12 @@ from app.services.appliance_service import ApplianceService
 from app.services.dashboard_service import DashboardService
 from app.services.user_settings_service import UserSettingsService
 from app.services.email_service import EmailService
+from app.services.agent_service import AgentService
+
+from app.core.config import GEMINI_API_KEY, GEMINI_MODEL
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 def get_email_service() -> EmailService:
@@ -58,3 +64,18 @@ def get_user_settings_service(
 ) -> UserSettingsService:
     """Dependency provider for UserSettingsService"""
     return UserSettingsService(user_repo, token_repo, email_service)
+
+
+def get_gemini_model() -> BaseChatModel:
+    """Dependency provider for Gemini Chat model returning BaseChatModel abstraction"""
+    return ChatGoogleGenerativeAI(
+        model=GEMINI_MODEL,
+        google_api_key=GEMINI_API_KEY,
+    )
+
+
+def get_agent_service(
+    model: BaseChatModel = Depends(get_gemini_model),
+) -> AgentService:
+    """Dependency provider for AgentService"""
+    return AgentService(model)
