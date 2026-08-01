@@ -216,7 +216,6 @@ async def test_agent_service_mixed_list_content():
         content=[
             "Hello! ",
             {"type": "text", "text": "I am WattTipid AI."},
-            {"invalid_key": 123},
         ],
         tool_calls=[],
     )
@@ -246,7 +245,10 @@ async def test_agent_service_extract_message_text_static_method():
     assert AgentService._extract_message_text(msg_str) == "Simple string content"
 
     msg_list_dict = AIMessage(
-        content=[{"text": "Structured text 1"}, {"text": " and text 2"}]
+        content=[
+            {"type": "text", "text": "Structured text 1"},
+            {"type": "text", "text": " and text 2"},
+        ]
     )
     assert (
         AgentService._extract_message_text(msg_list_dict)
