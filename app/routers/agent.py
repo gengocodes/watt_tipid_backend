@@ -36,7 +36,11 @@ async def chat(
         request.message,
     )
     try:
-        response = await agent_service.chat(request.message)
+        response = await agent_service.chat(
+            user_id=current_user.id,
+            user_name=current_user.first_name,
+            user_message=request.message,
+        )
         logger.info(
             "POST /agents/chat response for user_id=%s | Reply: %r",
             current_user.id,

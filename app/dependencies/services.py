@@ -76,6 +76,8 @@ def get_gemini_model() -> BaseChatModel:
 
 def get_agent_service(
     model: BaseChatModel = Depends(get_gemini_model),
+    appliance_service: ApplianceService = Depends(get_appliance_service),
+    dashboard_service: DashboardService = Depends(get_dashboard_service),
 ) -> AgentService:
     """Dependency provider for AgentService"""
-    return AgentService(model)
+    return AgentService(model, appliance_service, dashboard_service)
