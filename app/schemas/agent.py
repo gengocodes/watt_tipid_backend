@@ -33,7 +33,7 @@ class GeminiContentBlock(BaseModel):
     text: str
 
 
-StreamStatus = Literal["analyzing", "executing_tools", "generating_response"]
+StreamStatus = Literal["analyzing", "executing_tools"]
 
 
 ActivityStatus = Literal["started", "completed"]
@@ -103,8 +103,10 @@ AgentStreamEvent = Annotated[
     Field(discriminator="type"),
 ]
 
+
 class ToolActivityConfig(TypedDict):
-    """ Configuration for tool's activity lifecycle """
+    """Configuration for tool's activity lifecycle"""
+
     id: str
     started: str
     completed: str

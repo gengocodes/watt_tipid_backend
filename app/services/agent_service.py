@@ -234,35 +234,12 @@ class AgentService:
                         yield activity
 
             # Phase 4: Final Model Turn & Stream Generation
-            generating_started = (
-                "Generating recommendations" if has_tools else "Generating response"
-            )
-            generating_completed = (
-                "Generated recommendations" if has_tools else "Generated response"
-            )
-
-            yield StreamActivityEvent(
-                id="act-generating",
-                message=generating_started,
-                status="started",
-            )
-            yield StreamStatusEvent(
-                status="generating_response",
-                message="Formulating response...",
-            )
-
             if has_tools:
                 async for event in ctx.model.astream_events(ctx.messages, version="v2"):
                     if event["event"] == "on_chat_model_stream":
                         token_text = self._extract_chunk_text(event["data"]["chunk"])
                         if token_text:
                             yield StreamTokenEvent(token=token_text)
-
-            yield StreamActivityEvent(
-                id="act-generating",
-                message=generating_completed,
-                status="completed",
-            )
 
             # Phase 5: Stream Complete
             yield StreamCompleteEvent()
