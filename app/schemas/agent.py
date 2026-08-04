@@ -2,8 +2,33 @@
 Agent request and response schemas
 """
 
-from typing import Annotated, Literal, Union, TypedDict
+from typing import Annotated, Literal, Union, TypedDict, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
+
+T = TypeVar("T")
+
+
+class AgentToolResult(BaseModel, Generic[T]):
+    """Generic strongly-typed response model for agent tools."""
+
+    success: bool = Field(..., description="Whether the tool operation succeeded")
+    message: str = Field(..., description="Human-readable result or error message")
+    data: T | None = Field(default=None, description="Typed result payload")
+
+
+class ApplianceDeletePayload(BaseModel):
+    """Typed payload for appliance deletion tool result."""
+
+    appliance_id: str = Field(..., description="UUID of the deleted appliance")
+
+
+class ChatHistoryMessage(BaseModel):
+    """Schema representing a past message turn in the conversation"""
+
+    role: Literal["user", "assistant"] = Field(..., description="Sender role")
+    content: str = Field(
+        ..., min_length=1, max_length=5000, description="Message text content"
+    )
 
 
 class ChatRequest(BaseModel):
@@ -12,6 +37,9 @@ class ChatRequest(BaseModel):
     """
 
     message: str = Field(..., min_length=1, description="User prompt or question")
+    history: list[ChatHistoryMessage] = Field(
+        default_factory=list, description="Prior client-provided conversation history"
+    )
 
 
 class ChatResponse(BaseModel):

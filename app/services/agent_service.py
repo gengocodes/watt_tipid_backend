@@ -20,6 +20,7 @@ from app.prompts.agent import get_system_prompt
 from app.schemas.agent import (
     ActivityStatus,
     AgentStreamEvent,
+    ChatHistoryMessage,
     ChatResponse,
     GeminiContentBlock,
     StreamActivityEvent,
@@ -36,6 +37,9 @@ from app.services.tool_executor import ToolExecutor
 from app.tools.agent_tools import (
     create_user_appliances_tool,
     create_user_energy_summary_tool,
+    create_add_user_appliance_tool,
+    create_update_user_appliance_tool,
+    create_delete_user_appliance_tool,
 )
 from app.exceptions.agent import AgentServiceError
 
@@ -71,23 +75,52 @@ class AgentService:
         return [
             create_user_appliances_tool(user_id, self.appliance_service),
             create_user_energy_summary_tool(user_id, self.dashboard_service),
+            create_add_user_appliance_tool(user_id, self.appliance_service),
+            create_update_user_appliance_tool(user_id, self.appliance_service),
+            create_delete_user_appliance_tool(user_id, self.appliance_service),
         ]
 
     @staticmethod
-    def _build_initial_messages(user_name: str, user_message: str) -> list[BaseMessage]:
-        """Build initial system prompt and user message list."""
+    def _build_initial_messages(
+        user_name: str,
+        user_message: str,
+        history: list[ChatHistoryMessage] | None = None,
+    ) -> list[BaseMessage]:
+        """
+        Build system prompt (always at index=0), sanitized client-provided history,
+        and current user message.
+        """
         system_prompt = get_system_prompt(user_name)
-        return [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ]
+        messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
+
+        if history:
+            # 1. Sanitize first: filter out empty or whitespace-only items
+            sanitized_history = [
+                h for h in history if h.content and h.content.strip()
+            ]
+            # 2. Truncate second: keep at most the last 10 messages
+            truncated_history = sanitized_history[-10:]
+
+            for item in truncated_history:
+                cleaned_text = item.content.strip()
+                if item.role == "user":
+                    messages.append(HumanMessage(content=cleaned_text))
+                elif item.role == "assistant":
+                    messages.append(AIMessage(content=cleaned_text))
+
+        messages.append(HumanMessage(content=user_message))
+        return messages
 
     def _prepare_context(
-        self, user_id: str, user_name: str, user_message: str
+        self,
+        user_id: str,
+        user_name: str,
+        user_message: str,
+        history: list[ChatHistoryMessage] | None = None,
     ) -> AgentChatContext:
         """Prepare tools, messages, and tool-bound model for a chat session."""
         tools = self._build_tools(user_id)
-        messages = self._build_initial_messages(user_name, user_message)
+        messages = self._build_initial_messages(user_name, user_message, history)
         bound_model = self.model.bind_tools(tools)
         return AgentChatContext(tools=tools, messages=messages, model=bound_model)
 
@@ -138,14 +171,18 @@ class AgentService:
         )
 
     async def chat(
-        self, user_id: str, user_name: str, user_message: str
+        self,
+        user_id: str,
+        user_name: str,
+        user_message: str,
+        history: list[ChatHistoryMessage] | None = None,
     ) -> ChatResponse:
         """
         Process user message via LangChain and Gemini model with tools
         """
         logger.info("AgentService.chat: User Prompt: %r", user_message)
 
-        ctx = self._prepare_context(user_id, user_name, user_message)
+        ctx = self._prepare_context(user_id, user_name, user_message, history)
         tool_executor = ToolExecutor(ctx.tools)
 
         try:
@@ -164,7 +201,11 @@ class AgentService:
             raise AgentServiceError("Failed to generate AI response.") from e
 
     async def stream_chat(
-        self, user_id: str, user_name: str, user_message: str
+        self,
+        user_id: str,
+        user_name: str,
+        user_message: str,
+        history: list[ChatHistoryMessage] | None = None,
     ) -> AsyncGenerator[AgentStreamEvent, None]:
         """
         Process user message via LangChain and Gemini model with tools, streaming typed SSE events.
@@ -182,7 +223,7 @@ class AgentService:
                 status="started",
             )
 
-            ctx = self._prepare_context(user_id, user_name, user_message)
+            ctx = self._prepare_context(user_id, user_name, user_message, history)
             tool_executor = ToolExecutor(ctx.tools)
             initial_ai_message: AIMessage | None = None
 
