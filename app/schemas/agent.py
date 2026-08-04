@@ -22,12 +22,24 @@ class ApplianceDeletePayload(BaseModel):
     appliance_id: str = Field(..., description="UUID of the deleted appliance")
 
 
+class ChatHistoryMessage(BaseModel):
+    """Schema representing a past message turn in the conversation"""
+
+    role: Literal["user", "assistant"] = Field(..., description="Sender role")
+    content: str = Field(
+        ..., min_length=1, max_length=5000, description="Message text content"
+    )
+
+
 class ChatRequest(BaseModel):
     """
     Chat request schema
     """
 
     message: str = Field(..., min_length=1, description="User prompt or question")
+    history: list[ChatHistoryMessage] = Field(
+        default_factory=list, description="Prior client-provided conversation history"
+    )
 
 
 class ChatResponse(BaseModel):

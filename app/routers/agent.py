@@ -41,6 +41,7 @@ async def chat(
             user_id=current_user.id,
             user_name=current_user.first_name,
             user_message=request.message,
+            history=request.history,
         )
         logger.info(
             "POST /agents/chat response for user_id=%s | Reply: %r",
@@ -79,6 +80,7 @@ async def chat_stream(
                 user_id=current_user.id,
                 user_name=current_user.first_name,
                 user_message=request.message,
+                history=request.history,
             ):
                 yield f"data: {event.model_dump_json()}\n\n"
         except Exception as e:  # pylint: disable=broad-except

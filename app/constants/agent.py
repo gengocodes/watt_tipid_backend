@@ -16,17 +16,17 @@ TOOL_ACTIVITY_CONFIG: dict[str, ToolActivityConfig] = {
     },
     "add_user_appliance": {
         "id": "act-add-appliance",
-        "started": "Adding your appliance",
-        "completed": "Added your appliance",
+        "started": "Adding an appliance",
+        "completed": "Added an appliance",
     },
     "update_user_appliance": {
         "id": "act-update-appliance",
-        "started": "Updating your appliance",
-        "completed": "Updated your appliance",
+        "started": "Updating an appliance",
+        "completed": "Updated an appliance",
     },
     "delete_user_appliance": {
         "id": "act-delete-appliance",
-        "started": "Deleting your appliance",
-        "completed": "Deleted your appliance",
+        "started": "Deleting an appliance",
+        "completed": "Deleted an appliance",
     },
 }
