@@ -12,6 +12,7 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
+from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 
 from app.constants.agent import TOOL_ACTIVITY_CONFIG
@@ -47,7 +48,7 @@ class AgentChatContext:
 
     tools: list[BaseTool]
     messages: list[BaseMessage]
-    model: BaseChatModel
+    model: Runnable
 
 
 class AgentService:
