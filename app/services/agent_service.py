@@ -95,9 +95,7 @@ class AgentService:
 
         if history:
             # 1. Sanitize first: filter out empty or whitespace-only items
-            sanitized_history = [
-                h for h in history if h.content and h.content.strip()
-            ]
+            sanitized_history = [h for h in history if h.content and h.content.strip()]
             # 2. Truncate second: keep at most the last 10 messages
             truncated_history = sanitized_history[-10:]
 
@@ -184,14 +182,20 @@ class AgentService:
 
         ctx = self._prepare_context(user_id, user_name, user_message, history)
         tool_executor = ToolExecutor(ctx.tools)
+        max_tool_turns = 5
 
         try:
-            response: AIMessage = await ctx.model.ainvoke(ctx.messages)
+            response: AIMessage | None = None
 
-            if response.tool_calls:
+            for _ in range(max_tool_turns):
+                response = await ctx.model.ainvoke(ctx.messages)
+                if not isinstance(response, AIMessage) or not response.tool_calls:
+                    break
                 ctx.messages.append(response)
                 await tool_executor.execute(response.tool_calls, ctx.messages)
-                response = await ctx.model.ainvoke(ctx.messages)
+
+            if response is None or not isinstance(response, AIMessage):
+                raise AgentServiceError("Failed to generate AI response.")
 
             text_content = self._extract_message_text(response)
             logger.info("AgentService.chat: Assistant Reply: %r", text_content)
@@ -225,48 +229,51 @@ class AgentService:
 
             ctx = self._prepare_context(user_id, user_name, user_message, history)
             tool_executor = ToolExecutor(ctx.tools)
-            initial_ai_message: AIMessage | None = None
+            max_tool_turns = 5
 
-            # Phase 2: First Model Turn - Stream Tokens & Capture Message Output
-            async for event in ctx.model.astream_events(ctx.messages):
-                if event["event"] == "on_chat_model_stream":
-                    token_text = self._extract_chunk_text(event["data"]["chunk"])
-                    if token_text:
-                        yield StreamTokenEvent(token=token_text)
-                elif event["event"] == "on_chat_model_end":
-                    output = event["data"]["output"]
-                    if isinstance(output, AIMessage):
-                        initial_ai_message = output
+            for turn in range(max_tool_turns):
+                current_ai_message: AIMessage | None = None
 
-            yield StreamActivityEvent(
-                id="act-understanding",
-                message="Understood your request",
-                status="completed",
-            )
+                async for event in ctx.model.astream_events(ctx.messages, version="v2"):
+                    if event["event"] == "on_chat_model_stream":
+                        token_text = self._extract_chunk_text(event["data"]["chunk"])
+                        if token_text:
+                            yield StreamTokenEvent(token=token_text)
+                    elif event["event"] == "on_chat_model_end":
+                        output = event["data"]["output"]
+                        if isinstance(output, AIMessage):
+                            current_ai_message = output
 
-            # Phase 3: Tool Execution (If Tool Calls Requested)
-            has_tools = bool(initial_ai_message and initial_ai_message.tool_calls)
+                if turn == 0:
+                    yield StreamActivityEvent(
+                        id="act-understanding",
+                        message="Understood your request",
+                        status="completed",
+                    )
 
-            if has_tools and initial_ai_message:
+                if not current_ai_message or not current_ai_message.tool_calls:
+                    break
+
+                # Phase 2: Sequential Tool Execution
                 yield StreamStatusEvent(
                     status="executing_tools",
-                    message="Retrieving requested energy data...",
+                    message="Executing requested action...",
                 )
-                ctx.messages.append(initial_ai_message)
+                ctx.messages.append(current_ai_message)
 
-                tool_names = [tc["name"] for tc in initial_ai_message.tool_calls]
+                tool_names = [tc["name"] for tc in current_ai_message.tool_calls]
 
                 for name in tool_names:
                     activity = self._create_tool_activity_event(name, "started")
                     if activity:
                         yield activity
 
-                for tool_call in initial_ai_message.tool_calls:
+                for tool_call in current_ai_message.tool_calls:
                     yield StreamToolStartEvent(tool_name=tool_call["name"])
 
-                await tool_executor.execute(initial_ai_message.tool_calls, ctx.messages)
+                await tool_executor.execute(current_ai_message.tool_calls, ctx.messages)
 
-                for tool_call in initial_ai_message.tool_calls:
+                for tool_call in current_ai_message.tool_calls:
                     yield StreamToolEndEvent(tool_name=tool_call["name"])
 
                 for name in tool_names:
@@ -274,15 +281,7 @@ class AgentService:
                     if activity:
                         yield activity
 
-            # Phase 4: Final Model Turn & Stream Generation
-            if has_tools:
-                async for event in ctx.model.astream_events(ctx.messages, version="v2"):
-                    if event["event"] == "on_chat_model_stream":
-                        token_text = self._extract_chunk_text(event["data"]["chunk"])
-                        if token_text:
-                            yield StreamTokenEvent(token=token_text)
-
-            # Phase 5: Stream Complete
+            # Final Phase: Stream Complete
             yield StreamCompleteEvent()
 
         except Exception as e:  # pylint: disable=broad-except

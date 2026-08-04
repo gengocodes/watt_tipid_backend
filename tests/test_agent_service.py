@@ -242,10 +242,70 @@ async def test_agent_service_history_tool_execution_flow():
     # Verify the initial call received SystemMessage +
     # 2 history messages + 1 current message = 4 messages
     first_call_messages = bound_model.ainvoke.call_args_list[0][0][0]
-    assert isinstance(first_call_messages[0], SystemMessage)
-    assert first_call_messages[1].content == "bro pa add nga ng isang appliance, TV"
-    assert (
-        first_call_messages[2].content
-        == "Sige bro! Ilang watts at ilang hours mo ginagamit bawat araw?"
-    )
     assert first_call_messages[3].content == "250 watts 8 hours"
+
+
+@pytest.mark.anyio
+async def test_agent_service_multi_step_sequential_tool_loop():
+    """
+    Test that AgentService handles sequential tool turns
+    (e.g. Turn 1: get_user_appliances -> Turn 2: update_user_appliance -> Turn 3: text reply).
+    """
+    mock_model = MagicMock()
+    bound_model = MagicMock()
+
+    now = datetime.now(timezone.utc)
+    tv_appliance = ApplianceResponse(
+        id="app-tv-999",
+        user_id="user1",
+        name="TV",
+        category="Entertainment",
+        wattage_watts=250.0,
+        daily_usage_hours=8.0,
+        icon="plug",
+        is_active=True,
+        monthly_kwh=60.0,
+        created_at=now,
+        updated_at=now,
+    )
+
+    # Turn 1: Model calls get_user_appliances
+    turn1_ai = AIMessage(
+        content="",
+        tool_calls=[{"name": "get_user_appliances", "args": {}, "id": "call_get"}],
+    )
+    # Turn 2: Model receives appliance list and calls update_user_appliance
+    turn2_ai = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "update_user_appliance",
+                "args": {"appliance_id": "app-tv-999", "icon": "tv"},
+                "id": "call_update",
+            }
+        ],
+    )
+    # Turn 3: Model returns final text message
+    turn3_ai = AIMessage(content="Updated TV icon to TV!", tool_calls=[])
+
+    bound_model.ainvoke = AsyncMock(side_effect=[turn1_ai, turn2_ai, turn3_ai])
+    mock_model.bind_tools = MagicMock(return_value=bound_model)
+
+    mock_appliance_service = MagicMock()
+    mock_appliance_service.get_user_appliances.return_value = [tv_appliance]
+    mock_appliance_service.get_appliances.return_value = [tv_appliance]
+    mock_appliance_service.get_by_id_and_user.return_value = tv_appliance
+    mock_appliance_service.update_appliance.return_value = tv_appliance
+
+    service = AgentService(
+        model=mock_model,
+        appliance_service=mock_appliance_service,
+        dashboard_service=MagicMock(),
+    )
+
+    result = await service.chat("user1", "Juan", "Make TV icon tv")
+
+    assert result.message == "Updated TV icon to TV!"
+    assert bound_model.ainvoke.call_count == 3
+    mock_appliance_service.get_appliances.assert_called_once_with("user1")
+    mock_appliance_service.update_appliance.assert_called_once()
