@@ -82,3 +82,10 @@ Run static type checking:
 ```bash
 python -m mypy .\app\main.py
 ```
+
+# Important Documentation/Links:
+```bash
+https://reference.langchain.com/python/langchain-core
+https://docs.langchain.com/oss/python/langchain/overview
+https://docs.langchain.com/oss/python/langchain/streaming
+```
