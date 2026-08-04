@@ -7,10 +7,25 @@ import logging
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 from datetime import datetime, timezone
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import (
+    SystemMessage,
+    HumanMessage,
+    AIMessage,
+    ToolMessage,
+    AIMessageChunk,
+)
 
 from app.services.agent_service import AgentService, AgentServiceError
-from app.schemas.agent import ChatResponse
+from app.schemas.agent import (
+    ChatResponse,
+    StreamStatusEvent,
+    StreamActivityEvent,
+    StreamToolStartEvent,
+    StreamToolEndEvent,
+    StreamTokenEvent,
+    StreamErrorEvent,
+    StreamCompleteEvent,
+)
 from app.schemas.energy import ApplianceResponse, EnergySummaryResponse
 from app.prompts.agent import get_system_prompt
 from app.tools.agent_tools import (
@@ -335,3 +350,137 @@ async def test_agent_service_duplicate_tool_calls():
     assert len(tool_messages) == 2
     assert tool_messages[0].tool_call_id == "call_1"
     assert tool_messages[1].tool_call_id == "call_2"
+
+
+async def _async_gen(items):
+    for item in items:
+        yield item
+
+
+@pytest.mark.anyio
+async def test_agent_service_stream_chat_success_no_tools():
+    """
+    Test stream_chat yielding status, activity, token,
+    and complete events when no tools are invoked.
+    """
+    mock_model = MagicMock()
+    bound_model = MagicMock()
+
+    chunk1 = AIMessageChunk(content="Save energy by using LED bulbs.")
+    final_output = AIMessage(content="Save energy by using LED bulbs.", tool_calls=[])
+
+    events = [
+        {"event": "on_chat_model_stream", "data": {"chunk": chunk1}},
+        {"event": "on_chat_model_end", "data": {"output": final_output}},
+    ]
+
+    bound_model.astream_events = MagicMock(return_value=_async_gen(events))
+    mock_model.bind_tools = MagicMock(return_value=bound_model)
+
+    service = AgentService(
+        model=mock_model,
+        appliance_service=MagicMock(),
+        dashboard_service=MagicMock(),
+    )
+
+    emitted_events = [
+        event async for event in service.stream_chat("user1", "Juan", "Tips to save?")
+    ]
+
+    event_types = [type(e) for e in emitted_events]
+    assert StreamStatusEvent in event_types
+    assert StreamActivityEvent in event_types
+    assert StreamTokenEvent in event_types
+    assert StreamCompleteEvent in event_types
+
+    token_events = [e for e in emitted_events if isinstance(e, StreamTokenEvent)]
+    assert len(token_events) == 1
+    assert token_events[0].token == "Save energy by using LED bulbs."
+
+
+@pytest.mark.anyio
+async def test_agent_service_stream_chat_with_tools():
+    """
+    Test stream_chat sequence when tools are requested by the model.
+    """
+    mock_model = MagicMock()
+    bound_model = MagicMock()
+
+    tool_call_output = AIMessage(
+        content="",
+        tool_calls=[{"name": "get_user_appliances", "args": {}, "id": "call_999"}],
+    )
+    turn1_events = [
+        {"event": "on_chat_model_end", "data": {"output": tool_call_output}},
+    ]
+
+    chunk_final = AIMessageChunk(content="You have 1 AC.")
+    turn2_output = AIMessage(content="You have 1 AC.", tool_calls=[])
+    turn2_events = [
+        {"event": "on_chat_model_stream", "data": {"chunk": chunk_final}},
+        {"event": "on_chat_model_end", "data": {"output": turn2_output}},
+    ]
+
+    bound_model.astream_events = MagicMock(
+        side_effect=[_async_gen(turn1_events), _async_gen(turn2_events)]
+    )
+    mock_model.bind_tools = MagicMock(return_value=bound_model)
+
+    mock_appliance_service = MagicMock()
+    mock_appliance_service.get_appliances.return_value = []
+
+    service = AgentService(
+        model=mock_model,
+        appliance_service=mock_appliance_service,
+        dashboard_service=MagicMock(),
+    )
+
+    emitted_events = [
+        event async for event in service.stream_chat("user1", "Maria", "My appliances?")
+    ]
+
+    event_types = [type(e) for e in emitted_events]
+    assert StreamStatusEvent in event_types
+    assert StreamActivityEvent in event_types
+    assert StreamToolStartEvent in event_types
+    assert StreamToolEndEvent in event_types
+    assert StreamTokenEvent in event_types
+    assert StreamCompleteEvent in event_types
+
+    activity_events = [e for e in emitted_events if isinstance(e, StreamActivityEvent)]
+    appliances_activities = [a for a in activity_events if a.id == "act-appliances"]
+    assert len(appliances_activities) == 2
+    assert appliances_activities[0].status == "started"
+    assert appliances_activities[1].status == "completed"
+
+
+@pytest.mark.anyio
+async def test_agent_service_stream_chat_error_handling():
+    """
+    Test stream_chat error handling yielding user-safe StreamErrorEvent on exception.
+    """
+    mock_model = MagicMock()
+    bound_model = MagicMock()
+    bound_model.astream_events = MagicMock(
+        side_effect=RuntimeError("Model service down")
+    )
+    mock_model.bind_tools = MagicMock(return_value=bound_model)
+
+    service = AgentService(
+        model=mock_model,
+        appliance_service=MagicMock(),
+        dashboard_service=MagicMock(),
+    )
+
+    emitted_events = [
+        event async for event in service.stream_chat("user1", "Juan", "Test error")
+    ]
+
+    assert len(emitted_events) == 3
+    assert isinstance(emitted_events[0], StreamStatusEvent)
+    assert isinstance(emitted_events[1], StreamActivityEvent)
+    assert isinstance(emitted_events[2], StreamErrorEvent)
+    assert (
+        emitted_events[2].error
+        == "Failed to generate AI response. Please try again later."
+    )
