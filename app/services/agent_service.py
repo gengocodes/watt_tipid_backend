@@ -36,6 +36,9 @@ from app.services.tool_executor import ToolExecutor
 from app.tools.agent_tools import (
     create_user_appliances_tool,
     create_user_energy_summary_tool,
+    create_add_user_appliance_tool,
+    create_update_user_appliance_tool,
+    create_delete_user_appliance_tool,
 )
 from app.exceptions.agent import AgentServiceError
 
@@ -71,6 +74,9 @@ class AgentService:
         return [
             create_user_appliances_tool(user_id, self.appliance_service),
             create_user_energy_summary_tool(user_id, self.dashboard_service),
+            create_add_user_appliance_tool(user_id, self.appliance_service),
+            create_update_user_appliance_tool(user_id, self.appliance_service),
+            create_delete_user_appliance_tool(user_id, self.appliance_service),
         ]
 
     @staticmethod

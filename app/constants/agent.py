@@ -14,4 +14,19 @@ TOOL_ACTIVITY_CONFIG: dict[str, ToolActivityConfig] = {
         "started": "Analyzing your energy usage",
         "completed": "Analyzed your energy usage",
     },
+    "add_user_appliance": {
+        "id": "act-add-appliance",
+        "started": "Adding your appliance",
+        "completed": "Added your appliance",
+    },
+    "update_user_appliance": {
+        "id": "act-update-appliance",
+        "started": "Updating your appliance",
+        "completed": "Updated your appliance",
+    },
+    "delete_user_appliance": {
+        "id": "act-delete-appliance",
+        "started": "Deleting your appliance",
+        "completed": "Deleted your appliance",
+    },
 }
