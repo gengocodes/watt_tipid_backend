@@ -11,6 +11,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolCall,
 )
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
@@ -159,7 +160,7 @@ class AgentService:
         return cls._extract_message_text(chunk)
 
     @staticmethod
-    def _parse_search_args(tool_call: dict) -> WebSearchToolArgs | None:
+    def _parse_search_args(tool_call: ToolCall) -> WebSearchToolArgs | None:
         """Helper to validate WebSearchToolArgs if tool_call is web_search."""
         if tool_call.get("name") == "web_search" and tool_call.get("args"):
             try:
