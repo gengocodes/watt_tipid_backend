@@ -88,4 +88,6 @@ python -m mypy .\app\main.py
 https://reference.langchain.com/python/langchain-core
 https://docs.langchain.com/oss/python/langchain/overview
 https://docs.langchain.com/oss/python/langchain/streaming
+https://medium.com/@pouya_gh/build-your-own-deep-search-part-1-the-core-ai-agent-logic-592eeaf16356
+https://lite.duckduckgo.com/lite/
 ```

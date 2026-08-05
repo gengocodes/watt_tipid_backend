@@ -26,11 +26,13 @@ async def test_agent_service_binds_all_tools():
 
     mock_appliance_service = MagicMock()
     mock_dashboard_service = MagicMock()
+    mock_web_search_service = MagicMock()
 
     service = AgentService(
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=mock_dashboard_service,
+        web_search_service=mock_web_search_service,
     )
 
     await service.chat("user123", "Juan", "Hi")
@@ -44,6 +46,7 @@ async def test_agent_service_binds_all_tools():
     assert "add_user_appliance" in tool_names
     assert "update_user_appliance" in tool_names
     assert "delete_user_appliance" in tool_names
+    assert "web_search" in tool_names
 
 
 @pytest.mark.anyio
@@ -97,6 +100,7 @@ async def test_agent_service_add_appliance_tool_flow():
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=mock_dashboard_service,
+        web_search_service=MagicMock(),
     )
 
     res = await service.chat(
@@ -124,6 +128,7 @@ async def test_system_prompt_cannot_be_overridden_by_history():
         model=mock_model,
         appliance_service=MagicMock(),
         dashboard_service=MagicMock(),
+        web_search_service=MagicMock(),
     )
 
     malicious_history = [
@@ -224,6 +229,7 @@ async def test_agent_service_history_tool_execution_flow():
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=MagicMock(),
+        web_search_service=MagicMock(),
     )
 
     history = [
@@ -301,6 +307,7 @@ async def test_agent_service_multi_step_sequential_tool_loop():
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=MagicMock(),
+        web_search_service=MagicMock(),
     )
 
     result = await service.chat("user1", "Juan", "Make TV icon tv")
