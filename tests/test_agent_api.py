@@ -5,8 +5,8 @@ Unit tests for AI Agent service and router
 import io
 import logging
 from unittest.mock import AsyncMock, MagicMock
-import pytest
 from datetime import datetime, timezone
+import pytest
 from langchain_core.messages import (
     SystemMessage,
     HumanMessage,
@@ -26,7 +26,7 @@ from app.schemas.agent import (
     StreamErrorEvent,
     StreamCompleteEvent,
 )
-from app.schemas.energy import ApplianceResponse, EnergySummaryResponse
+from app.schemas.energy import ApplianceResponse
 from app.prompts.agent import get_system_prompt
 from app.tools.agent_tools import (
     create_user_appliances_tool,
@@ -49,11 +49,13 @@ async def test_agent_service_success():
 
     mock_appliance_service = MagicMock()
     mock_dashboard_service = MagicMock()
+    mock_web_search_service = MagicMock()
 
     service = AgentService(
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=mock_dashboard_service,
+        web_search_service=mock_web_search_service,
     )
     result = await service.chat("user123", "Juan", "How do I save energy?")
 
@@ -113,11 +115,13 @@ async def test_agent_service_tool_invocation():
         )
     ]
     mock_dashboard_service = MagicMock()
+    mock_web_search_service = MagicMock()
 
     service = AgentService(
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=mock_dashboard_service,
+        web_search_service=mock_web_search_service,
     )
     result = await service.chat("user123", "Maria", "What appliances do I have?")
 
@@ -208,11 +212,13 @@ async def test_agent_service_structured_dict_content():
 
     mock_appliance_service = MagicMock()
     mock_dashboard_service = MagicMock()
+    mock_web_search_service = MagicMock()
 
     service = AgentService(
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=mock_dashboard_service,
+        web_search_service=mock_web_search_service,
     )
     result = await service.chat("user123", "Pedro", "Hi")
 
@@ -239,11 +245,13 @@ async def test_agent_service_mixed_list_content():
 
     mock_appliance_service = MagicMock()
     mock_dashboard_service = MagicMock()
+    mock_web_search_service = MagicMock()
 
     service = AgentService(
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=mock_dashboard_service,
+        web_search_service=mock_web_search_service,
     )
     result = await service.chat("user123", "Pedro", "Hi")
 
@@ -283,11 +291,13 @@ async def test_agent_service_error_handling():
 
     mock_appliance_service = MagicMock()
     mock_dashboard_service = MagicMock()
+    mock_web_search_service = MagicMock()
 
     service = AgentService(
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=mock_dashboard_service,
+        web_search_service=mock_web_search_service,
     )
 
     with pytest.raises(AgentServiceError) as exc_info:
@@ -330,11 +340,13 @@ async def test_agent_service_duplicate_tool_calls():
     mock_appliance_service = MagicMock()
     mock_appliance_service.get_appliances.return_value = []
     mock_dashboard_service = MagicMock()
+    mock_web_search_service = MagicMock()
 
     service = AgentService(
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=mock_dashboard_service,
+        web_search_service=mock_web_search_service,
     )
     result = await service.chat("user123", "Maria", "Check my appliances")
 
@@ -381,6 +393,7 @@ async def test_agent_service_stream_chat_success_no_tools():
         model=mock_model,
         appliance_service=MagicMock(),
         dashboard_service=MagicMock(),
+        web_search_service=MagicMock(),
     )
 
     emitted_events = [
@@ -433,6 +446,7 @@ async def test_agent_service_stream_chat_with_tools():
         model=mock_model,
         appliance_service=mock_appliance_service,
         dashboard_service=MagicMock(),
+        web_search_service=MagicMock(),
     )
 
     emitted_events = [
@@ -470,6 +484,7 @@ async def test_agent_service_stream_chat_error_handling():
         model=mock_model,
         appliance_service=MagicMock(),
         dashboard_service=MagicMock(),
+        web_search_service=MagicMock(),
     )
 
     emitted_events = [
