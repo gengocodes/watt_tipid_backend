@@ -22,6 +22,30 @@ class ApplianceDeletePayload(BaseModel):
     appliance_id: str = Field(..., description="UUID of the deleted appliance")
 
 
+class SearchResultItem(BaseModel):
+    """Structured search result item."""
+
+    title: str = Field(..., description="Title of the search result page")
+    url: str = Field(..., description="URL link of the search result")
+    snippet: str = Field(..., description="Short description or content snippet")
+
+
+class SearchResultsResponse(BaseModel):
+    """Typed payload containing web search results."""
+
+    query: str = Field(..., description="The query used for web search")
+    results: list[SearchResultItem] = Field(
+        default_factory=list, description="List of structured search result items"
+    )
+
+
+class WebSearchToolArgs(BaseModel):
+    """Typed arguments payload for web_search tool call."""
+
+    model_config = ConfigDict(extra="ignore")
+    query: str = Field(..., min_length=1, description="Web search query string")
+
+
 class ChatHistoryMessage(BaseModel):
     """Schema representing a past message turn in the conversation"""
 

@@ -29,4 +29,9 @@ TOOL_ACTIVITY_CONFIG: dict[str, ToolActivityConfig] = {
         "started": "Deleting an appliance",
         "completed": "Deleted an appliance",
     },
+    "web_search": {
+        "id": "act-web-search",
+        "started": "Searching the web for information",
+        "completed": "Found web search results",
+    },
 }

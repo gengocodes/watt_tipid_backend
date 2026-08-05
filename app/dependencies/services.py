@@ -19,6 +19,7 @@ from app.services.appliance_service import ApplianceService
 from app.services.dashboard_service import DashboardService
 from app.services.user_settings_service import UserSettingsService
 from app.services.email_service import EmailService
+from app.services.web_search_service import WebSearchService
 from app.services.agent_service import AgentService
 
 from app.core.config import GEMINI_API_KEY, GEMINI_MODEL
@@ -30,6 +31,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 def get_email_service() -> EmailService:
     """Dependency provider for EmailService"""
     return EmailService()
+
+
+def get_web_search_service() -> WebSearchService:
+    """Dependency provider for WebSearchService"""
+    return WebSearchService()
 
 
 def get_auth_service(
@@ -78,6 +84,7 @@ def get_agent_service(
     model: BaseChatModel = Depends(get_gemini_model),
     appliance_service: ApplianceService = Depends(get_appliance_service),
     dashboard_service: DashboardService = Depends(get_dashboard_service),
+    web_search_service: WebSearchService = Depends(get_web_search_service),
 ) -> AgentService:
     """Dependency provider for AgentService"""
-    return AgentService(model, appliance_service, dashboard_service)
+    return AgentService(model, appliance_service, dashboard_service, web_search_service)

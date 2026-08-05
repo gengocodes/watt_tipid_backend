@@ -4,6 +4,7 @@ LangChain data retrieval tools for WattTipid AI Agent
 
 import time
 import logging
+import inspect
 
 from typing import List
 from collections.abc import Callable
@@ -14,25 +15,60 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from app.services.appliance_service import ApplianceService
 from app.services.dashboard_service import DashboardService
+from app.services.web_search_service import WebSearchService
 from app.schemas.energy import (
     ApplianceCreate,
     ApplianceUpdate,
     ApplianceResponse,
     EnergySummaryResponse,
 )
-from app.schemas.agent import AgentToolResult, ApplianceDeletePayload
+from app.schemas.agent import (
+    AgentToolResult,
+    ApplianceDeletePayload,
+    SearchResultsResponse,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def log_tool_execution(tool_name: str):
     """
-    Decorator to log the execution of a tool.
+    Decorator to log the execution of a tool (sync or async).
     """
 
     def decorator(func: Callable):
+        if inspect.iscoroutinefunction(func):
+
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                logger.info("Agent tool %s invoked", tool_name)
+                start_time = time.perf_counter()
+
+                try:
+                    result = await func(*args, **kwargs)
+
+                    duration = time.perf_counter() - start_time
+                    logger.info(
+                        "Agent tool %s completed successfully in %.3fs",
+                        tool_name,
+                        duration,
+                    )
+
+                    return result
+
+                except Exception:
+                    duration = time.perf_counter() - start_time
+                    logger.exception(
+                        "Agent tool %s failed after %.3fs",
+                        tool_name,
+                        duration,
+                    )
+                    raise
+
+            return async_wrapper
+
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def sync_wrapper(*args, **kwargs):
             logger.info("Agent tool %s invoked", tool_name)
             start_time = time.perf_counter()
 
@@ -57,7 +93,7 @@ def log_tool_execution(tool_name: str):
                 )
                 raise
 
-        return wrapper
+        return sync_wrapper
 
     return decorator
 
@@ -245,3 +281,28 @@ def create_delete_user_appliance_tool(
             )
 
     return delete_user_appliance
+
+
+def create_web_search_tool(
+    web_search_service: WebSearchService,
+) -> BaseTool:
+    """
+    Create tool allowing the AI agent to retrieve external information from the web.
+    """
+
+    @tool
+    @log_tool_execution("web_search")
+    async def web_search(query: str) -> AgentToolResult[SearchResultsResponse]:
+        """
+        Search the web for external information, such as appliance specifications,
+        energy efficiency references, electricity-saving tips, and supporting sources.
+
+        Requires:
+        - query: Clear, concise search query string.
+
+        Important: Once search results are retrieved, synthesize and answer the user directly.
+        Do NOT perform repeated or redundant search queries.
+        """
+        return await web_search_service.search(query)
+
+    return web_search

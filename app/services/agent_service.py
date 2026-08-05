@@ -11,9 +11,11 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolCall,
 )
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from pydantic import ValidationError
 
 from app.constants.agent import TOOL_ACTIVITY_CONFIG
 from app.prompts.agent import get_system_prompt
@@ -30,9 +32,11 @@ from app.schemas.agent import (
     StreamTokenEvent,
     StreamToolEndEvent,
     StreamToolStartEvent,
+    WebSearchToolArgs,
 )
 from app.services.appliance_service import ApplianceService
 from app.services.dashboard_service import DashboardService
+from app.services.web_search_service import WebSearchService
 from app.services.tool_executor import ToolExecutor
 from app.tools.agent_tools import (
     create_user_appliances_tool,
@@ -40,6 +44,7 @@ from app.tools.agent_tools import (
     create_add_user_appliance_tool,
     create_update_user_appliance_tool,
     create_delete_user_appliance_tool,
+    create_web_search_tool,
 )
 from app.exceptions.agent import AgentServiceError
 
@@ -65,10 +70,12 @@ class AgentService:
         model: BaseChatModel,
         appliance_service: ApplianceService,
         dashboard_service: DashboardService,
+        web_search_service: WebSearchService,
     ):
         self.model = model
         self.appliance_service = appliance_service
         self.dashboard_service = dashboard_service
+        self.web_search_service = web_search_service
 
     def _build_tools(self, user_id: str) -> list[BaseTool]:
         """Build LangChain tools bound to the specified user_id context."""
@@ -78,6 +85,7 @@ class AgentService:
             create_add_user_appliance_tool(user_id, self.appliance_service),
             create_update_user_appliance_tool(user_id, self.appliance_service),
             create_delete_user_appliance_tool(user_id, self.appliance_service),
+            create_web_search_tool(self.web_search_service),
         ]
 
     @staticmethod
@@ -152,15 +160,34 @@ class AgentService:
         return cls._extract_message_text(chunk)
 
     @staticmethod
+    def _parse_search_args(tool_call: ToolCall) -> WebSearchToolArgs | None:
+        """Helper to validate WebSearchToolArgs if tool_call is web_search."""
+        if tool_call.get("name") == "web_search" and tool_call.get("args"):
+            try:
+                return WebSearchToolArgs.model_validate(tool_call["args"])
+            except ValidationError:
+                pass
+        return None
+
+    @staticmethod
     def _create_tool_activity_event(
-        tool_name: str, status: ActivityStatus
+        tool_name: str,
+        status: ActivityStatus,
+        search_args: WebSearchToolArgs | None = None,
     ) -> StreamActivityEvent | None:
         """Create a typed StreamActivityEvent from declarative config."""
         config = TOOL_ACTIVITY_CONFIG.get(tool_name)
         if not config:
             return None
 
-        message = config["started"] if status == "started" else config["completed"]
+        if tool_name == "web_search" and search_args:
+            message = (
+                f'Searching: "{search_args.query}"'
+                if status == "started"
+                else f'Found search results for: "{search_args.query}"'
+            )
+        else:
+            message = config["started"] if status == "started" else config["completed"]
 
         return StreamActivityEvent(
             id=config["id"],
@@ -187,12 +214,21 @@ class AgentService:
         try:
             response: AIMessage | None = None
 
+            has_finished_text_turn = False
             for _ in range(max_tool_turns):
                 response = await ctx.model.ainvoke(ctx.messages)
                 if not isinstance(response, AIMessage) or not response.tool_calls:
+                    has_finished_text_turn = True
                     break
                 ctx.messages.append(response)
                 await tool_executor.execute(response.tool_calls, ctx.messages)
+
+            if not has_finished_text_turn:
+                logger.info(
+                    "Max tool turns reached (%d); forcing final text completion turn.",
+                    max_tool_turns,
+                )
+                response = await self.model.ainvoke(ctx.messages)
 
             if response is None or not isinstance(response, AIMessage):
                 raise AgentServiceError("Failed to generate AI response.")
@@ -230,6 +266,7 @@ class AgentService:
             ctx = self._prepare_context(user_id, user_name, user_message, history)
             tool_executor = ToolExecutor(ctx.tools)
             max_tool_turns = 5
+            has_finished_text_turn = False
 
             for turn in range(max_tool_turns):
                 current_ai_message: AIMessage | None = None
@@ -252,6 +289,7 @@ class AgentService:
                     )
 
                 if not current_ai_message or not current_ai_message.tool_calls:
+                    has_finished_text_turn = True
                     break
 
                 # Phase 2: Sequential Tool Execution
@@ -261,10 +299,12 @@ class AgentService:
                 )
                 ctx.messages.append(current_ai_message)
 
-                tool_names = [tc["name"] for tc in current_ai_message.tool_calls]
-
-                for name in tool_names:
-                    activity = self._create_tool_activity_event(name, "started")
+                for tool_call in current_ai_message.tool_calls:
+                    name = tool_call["name"]
+                    search_args = self._parse_search_args(tool_call)
+                    activity = self._create_tool_activity_event(
+                        name, "started", search_args=search_args
+                    )
                     if activity:
                         yield activity
 
@@ -276,10 +316,29 @@ class AgentService:
                 for tool_call in current_ai_message.tool_calls:
                     yield StreamToolEndEvent(tool_name=tool_call["name"])
 
-                for name in tool_names:
-                    activity = self._create_tool_activity_event(name, "completed")
+                for tool_call in current_ai_message.tool_calls:
+                    name = tool_call["name"]
+                    search_args = self._parse_search_args(tool_call)
+                    activity = self._create_tool_activity_event(
+                        name, "completed", search_args=search_args
+                    )
                     if activity:
                         yield activity
+
+            # If all max_tool_turns were spent executing tools without a final text output,
+            # force text generation turn
+            if not has_finished_text_turn:
+                logger.info(
+                    "Max tool turns reached (%d); forcing final text stream completion turn.",
+                    max_tool_turns,
+                )
+                async for event in self.model.astream_events(
+                    ctx.messages, version="v2"
+                ):
+                    if event["event"] == "on_chat_model_stream":
+                        token_text = self._extract_chunk_text(event["data"]["chunk"])
+                        if token_text:
+                            yield StreamTokenEvent(token=token_text)
 
             # Final Phase: Stream Complete
             yield StreamCompleteEvent()
