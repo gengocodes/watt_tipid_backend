@@ -3,8 +3,8 @@ Energy and Appliance schemas/DTOs
 """
 
 from typing import List, Optional
-from datetime import datetime
 from pydantic import BaseModel, Field
+from app.database.models import ApplianceInDB
 
 
 class ApplianceCreate(BaseModel):
@@ -42,22 +42,12 @@ class ApplianceUpdate(BaseModel):
     is_active: Optional[bool] = Field(None, description="Toggle active status")
 
 
-class ApplianceResponse(BaseModel):
-    """DTO for outbound appliance details (excludes _id)"""
+class ApplianceResponse(ApplianceInDB):
+    """DTO for outbound appliance details (includes computed monthly_kwh)"""
 
-    id: str = Field(..., description="Unique UUIDv4 identifier")
-    user_id: str = Field(..., description="Owner's user UUID")
-    name: str
-    category: str
-    wattage_watts: float
-    daily_usage_hours: float
-    icon: str
-    is_active: bool
     monthly_kwh: float = Field(
         ..., description="Calculated monthly energy usage in kWh"
     )
-    created_at: datetime
-    updated_at: datetime
 
 
 class CategoryShare(BaseModel):

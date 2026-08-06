@@ -1,14 +1,13 @@
 from typing import Optional
 import re
 from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+from app.database.models import UserSettings
 
 
-class UserSettingsResponse(BaseModel):
+class UserSettingsResponse(UserSettings):
     """Outbound settings DTO"""
 
-    electricity_rate_php_kwh: float = Field(
-        ..., description="Electricity rate in PHP/kWh"
-    )
+    pass
 
 
 class UserSettingsPatchRequest(BaseModel):

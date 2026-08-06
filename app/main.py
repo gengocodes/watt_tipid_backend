@@ -13,7 +13,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, energy, dashboard, user_settings, agent
+from app.routers import auth, energy, dashboard, user_settings, agent, saving_tips
 from app.database.redis import redis_client
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.core.config import ENV
@@ -50,6 +50,7 @@ app.include_router(energy.router)
 app.include_router(dashboard.router)
 app.include_router(user_settings.router)
 app.include_router(agent.router)
+app.include_router(saving_tips.router)
 
 
 # LoggingContextMiddleware wraps RateLimitMiddleware

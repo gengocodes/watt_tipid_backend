@@ -8,11 +8,15 @@ from app.dependencies.repositories import (
     get_refresh_token_repository,
     get_appliance_repository,
     get_monthly_energy_repository,
+    get_saving_tip_repository,
+    get_saving_tip_session_repository,
 )
 from app.repositories.user import UserRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.appliance import ApplianceRepository
 from app.repositories.monthly_energy import MonthlyEnergyRepository
+from app.repositories.saving_tip import SavingTipRepository
+from app.repositories.saving_tip_session import SavingTipSessionRepository
 
 from app.services.auth_service import AuthService
 from app.services.appliance_service import ApplianceService
@@ -21,7 +25,7 @@ from app.services.user_settings_service import UserSettingsService
 from app.services.email_service import EmailService
 from app.services.web_search_service import WebSearchService
 from app.services.agent_service import AgentService
-
+from app.services.saving_tip_service import SavingTipService
 from app.core.config import GEMINI_API_KEY, GEMINI_MODEL
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -88,3 +92,24 @@ def get_agent_service(
 ) -> AgentService:
     """Dependency provider for AgentService"""
     return AgentService(model, appliance_service, dashboard_service, web_search_service)
+
+
+def get_saving_tip_service(
+    saving_tip_session_repo: SavingTipSessionRepository = Depends(
+        get_saving_tip_session_repository
+    ),
+    saving_tip_repo: SavingTipRepository = Depends(get_saving_tip_repository),
+    appliance_repo: ApplianceRepository = Depends(get_appliance_repository),
+    user_repo: UserRepository = Depends(get_user_repository),
+    web_search_service: WebSearchService = Depends(get_web_search_service),
+    model: BaseChatModel = Depends(get_gemini_model),
+) -> SavingTipService:
+    """Dependency provider for SavingTipService"""
+    return SavingTipService(
+        saving_tip_session_repo,
+        saving_tip_repo,
+        appliance_repo,
+        user_repo,
+        web_search_service,
+        model,
+    )
