@@ -410,12 +410,17 @@ class SavingTipService:
         """Invoke Gemini with structured output for household evaluation."""
         user_prompt = self._build_household_prompt(context)
         structured_model = self.model.with_structured_output(HouseholdEvaluationResult)
-        return await structured_model.ainvoke(
+        result = await structured_model.ainvoke(
             [
                 SystemMessage(content=SAVING_TIP_SYSTEM_PROMPT),
                 HumanMessage(content=user_prompt),
             ]
         )
+        if isinstance(result, HouseholdEvaluationResult):
+            return result
+        if isinstance(result, dict):
+            return HouseholdEvaluationResult.model_validate(result)
+        raise ValueError(f"Unexpected LLM evaluation result type: {type(result)}")
 
     def _household_changed(self, context: HouseholdAnalysisContext) -> bool:
         """Check if current household snapshot differs from initial snapshot version."""
