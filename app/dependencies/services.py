@@ -53,9 +53,10 @@ def get_auth_service(
 
 def get_appliance_service(
     app_repo: ApplianceRepository = Depends(get_appliance_repository),
+    saving_tip_repo: SavingTipRepository = Depends(get_saving_tip_repository),
 ) -> ApplianceService:
     """Dependency provider for ApplianceService"""
-    return ApplianceService(app_repo)
+    return ApplianceService(app_repo, saving_tip_repo)
 
 
 def get_dashboard_service(

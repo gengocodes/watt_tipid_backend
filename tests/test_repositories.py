@@ -83,7 +83,7 @@ def test_appliance_repository_get_user_appliances():
     assert len(appliances) == 1
     assert appliances[0].id == "app-1"
     assert appliances[0].name == "Fan"
-    mock_coll.find.assert_called_once_with({"user_id": "user-123"})
+    mock_coll.find.assert_called_once_with({"user_id": "user-123", "is_active": True})
 
 
 def test_appliance_repository_update_appliance():
@@ -100,7 +100,7 @@ def test_appliance_repository_update_appliance():
     # Verify update_one was called with user_id context and the updated fields
     mock_coll.update_one.assert_called_once()
     args, _ = mock_coll.update_one.call_args
-    assert args[0] == {"id": "app-1", "user_id": "user-123"}
+    assert args[0] == {"id": "app-1", "user_id": "user-123", "is_active": True}
     assert "name" in args[1]["$set"]
     assert "wattage_watts" in args[1]["$set"]
     assert args[1]["$set"]["name"] == "New Fan Name"

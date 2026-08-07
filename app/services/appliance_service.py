@@ -5,9 +5,10 @@ Appliance service layer handling CRUD operations for user appliances.
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 from fastapi import HTTPException, status
 from app.repositories.appliance import ApplianceRepository
+from app.repositories.saving_tip import SavingTipRepository
 from app.database.models import ApplianceInDB, ApplianceAnalysisStatus
 from app.schemas.energy import ApplianceCreate, ApplianceUpdate, ApplianceResponse
 from app.utils.energy_calc import calculate_appliance_kwh
@@ -19,8 +20,13 @@ logger = logging.getLogger(__name__)
 class ApplianceService:
     """Handles CRUD queries and business logic for appliances"""
 
-    def __init__(self, appliance_repo: ApplianceRepository):
+    def __init__(
+        self,
+        appliance_repo: ApplianceRepository,
+        saving_tip_repo: Optional[SavingTipRepository] = None,
+    ):
         self.appliance_repo = appliance_repo
+        self.saving_tip_repo = saving_tip_repo
 
     def get_appliances(self, user_id: str) -> List[ApplianceResponse]:
         """
@@ -110,7 +116,7 @@ class ApplianceService:
 
     def delete_appliance(self, user_id: str, appliance_id: str) -> None:
         """
-        Delete an appliance after verifying ownership.
+        Soft delete an appliance (is_active=False) and mark linked tips as STALE.
         """
         success = self.appliance_repo.delete_appliance(appliance_id, user_id)
         if not success:
@@ -118,4 +124,6 @@ class ApplianceService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Appliance not found or access denied",
             )
-        logger.info("Deleted appliance (id: %s)", appliance_id)
+        if self.saving_tip_repo:
+            self.saving_tip_repo.mark_tips_stale_by_appliance_id(appliance_id, user_id)
+        logger.info("Soft-deleted appliance (id: %s)", appliance_id)

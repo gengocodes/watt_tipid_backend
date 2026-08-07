@@ -5,7 +5,7 @@ Saving Tip repository for accessing the saving_tips collection.
 from datetime import datetime, timezone
 from typing import Optional, List
 from pymongo.collection import Collection
-from app.database.models import SavingTipInDB
+from app.database.models import SavingTipInDB, TipStatus
 
 
 class SavingTipRepository:
@@ -65,3 +65,26 @@ class SavingTipRepository:
             {"$set": {"status": status, "updated_at": now}},
         )
         return result.modified_count > 0
+
+    def mark_tips_stale_by_appliance_id(self, appliance_id: str, user_id: str) -> int:
+        """Mark all active/completed saving tips for a specific appliance as STALE"""
+        now = datetime.now(timezone.utc)
+        result = self.collection.update_many(
+            {
+                "appliance_id": appliance_id,
+                "user_id": user_id,
+                "status": {"$ne": "deleted"},
+            },
+            {"$set": {"status": TipStatus.STALE, "updated_at": now}},
+        )
+        return result.modified_count
+
+    def mark_tips_stale_by_ids(self, tip_ids: List[str], user_id: str) -> None:
+        """Mark specified saving tips as STALE"""
+        if not tip_ids:
+            return
+        now = datetime.now(timezone.utc)
+        self.collection.update_many(
+            {"id": {"$in": tip_ids}, "user_id": user_id, "status": {"$ne": "deleted"}},
+            {"$set": {"status": TipStatus.STALE, "updated_at": now}},
+        )

@@ -23,8 +23,8 @@ class ApplianceRepository:
         return ApplianceInDB(**doc_copy)
 
     def get_user_appliances(self, user_id: str) -> List[ApplianceInDB]:
-        """Fetch all appliances owned by a user"""
-        cursor = self.collection.find({"user_id": user_id})
+        """Fetch all active appliances owned by a user"""
+        cursor = self.collection.find({"user_id": user_id, "is_active": True})
         appliances = []
         for doc in cursor:
             app = self._to_model(doc)
@@ -45,8 +45,10 @@ class ApplianceRepository:
     def get_by_id_and_user(
         self, appliance_id: str, user_id: str
     ) -> Optional[ApplianceInDB]:
-        """Fetch a specific appliance by id and verify ownership"""
-        doc = self.collection.find_one({"id": appliance_id, "user_id": user_id})
+        """Fetch a specific active appliance by id and verify ownership"""
+        doc = self.collection.find_one(
+            {"id": appliance_id, "user_id": user_id, "is_active": True}
+        )
         return self._to_model(doc)
 
     def create_appliance(self, appliance: ApplianceInDB) -> None:
@@ -56,7 +58,7 @@ class ApplianceRepository:
     def update_appliance(
         self, appliance_id: str, user_id: str, data: ApplianceUpdate
     ) -> bool:
-        """Update appliance fields based on typed update schema"""
+        """Update active appliance fields based on typed update schema"""
         update_fields = {
             k: v
             for k, v in data.model_dump(exclude_unset=True).items()
@@ -67,7 +69,7 @@ class ApplianceRepository:
 
         update_fields["updated_at"] = datetime.now(timezone.utc)
         result = self.collection.update_one(
-            {"id": appliance_id, "user_id": user_id},
+            {"id": appliance_id, "user_id": user_id, "is_active": True},
             {"$set": update_fields},
         )
         return result.modified_count > 0
@@ -78,7 +80,7 @@ class ApplianceRepository:
         """
         now = datetime.now(timezone.utc)
         result = self.collection.update_one(
-            {"id": appliance_id, "user_id": user_id},
+            {"id": appliance_id, "user_id": user_id, "is_active": True},
             {
                 "$set": {
                     "analysis_status": "NOT_ANALYZED",
@@ -119,7 +121,7 @@ class ApplianceRepository:
                 new_session_id = None
 
             res = self.collection.update_one(
-                {"id": app.id, "user_id": user_id},
+                {"id": app.id, "user_id": user_id, "is_active": True},
                 {
                     "$set": {
                         "analysis_status": new_status,
@@ -134,6 +136,10 @@ class ApplianceRepository:
         return modified_count
 
     def delete_appliance(self, appliance_id: str, user_id: str) -> bool:
-        """Delete an appliance by id and user ownership"""
-        result = self.collection.delete_one({"id": appliance_id, "user_id": user_id})
-        return result.deleted_count > 0
+        """Soft delete an appliance by setting is_active=False"""
+        now = datetime.now(timezone.utc)
+        result = self.collection.update_one(
+            {"id": appliance_id, "user_id": user_id, "is_active": True},
+            {"$set": {"is_active": False, "updated_at": now}},
+        )
+        return result.modified_count > 0
