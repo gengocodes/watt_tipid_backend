@@ -15,9 +15,11 @@ if not isinstance(app.database.redis.redis_client, AsyncMock):
 app.database.redis.redis_client.incr.return_value = 1
 app.database.redis.redis_client.expire.return_value = True
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from app.database.models import (
     ApplianceInDB,
+    SavingTipInDB,
     UserInDB,
     UserSettings,
     TipType,
@@ -291,3 +293,53 @@ def test_router_get_saving_tips_summary():
     mock_service.get_user_tips_summary.assert_called_once_with("user-1")
 
     app.dependency_overrides.clear()
+
+
+def test_update_tip_status_prevents_stale_tip_completion():
+    """Test that the service prevents the completion of stale stale tips."""
+    mock_session_repo = MagicMock()
+    mock_tip_repo = MagicMock()
+    mock_app_repo = MagicMock()
+    mock_user_repo = MagicMock()
+    mock_web_search = AsyncMock()
+    mock_model = MagicMock()
+
+    now = datetime.now(timezone.utc)
+    stale_tip = SavingTipInDB(
+        id="tip-stale",
+        user_id="user-1",
+        session_id="session-1",
+        appliance_id="app-deleted",
+        appliance_name="Deleted AC",
+        appliance_category="Cooling",
+        appliance_wattage_watts=1500.0,
+        appliance_daily_usage_hours=8.0,
+        appliance_monthly_kwh=360.0,
+        title="AC tip",
+        description="AC tip desc",
+        priority=PriorityLevel.HIGH,
+        effort_level=EffortLevel.LOW,
+        tip_type=TipType.CALCULATED,
+        status=TipStatus.STALE,
+        generated_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    mock_tip_repo.get_by_id_and_user.return_value = stale_tip
+
+    service = SavingTipService(
+        mock_session_repo,
+        mock_tip_repo,
+        mock_app_repo,
+        mock_user_repo,
+        mock_web_search,
+        mock_model,
+    )
+    with pytest.raises(HTTPException) as e:
+        service.update_tip_status("user-1", "tip-stale", "completed")
+
+    assert e.value.status_code == 400
+    assert (
+        "Stale tips for deleted appliances cannot be marked as completed"
+        in e.value.detail
+    )

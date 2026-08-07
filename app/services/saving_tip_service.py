@@ -196,6 +196,12 @@ class SavingTipService:
                 detail="Saving tip not found or access denied.",
             )
 
+        if tip.status == TipStatus.STALE and status_str != TipStatus.DELETED.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stale tips for deleted appliances cannot be marked as completed.",
+            )
+
         self.saving_tip_repo.update_status(tip_id, user_id, status_str)
         updated_tip = self.saving_tip_repo.get_by_id_and_user(tip_id, user_id)
         if not updated_tip:
