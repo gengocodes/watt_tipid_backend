@@ -499,3 +499,138 @@ async def test_agent_service_stream_chat_error_handling():
         emitted_events[2].error
         == "Failed to generate AI response. Please try again later."
     )
+
+
+@pytest.mark.anyio
+async def test_dynamic_activity_message_multi_delete():
+    """
+    Test that executing multiple delete calls in a single turn yields 'Deleted N appliances'.
+    """
+    mock_model = MagicMock()
+    bound_model = MagicMock()
+
+    tool_calls = [
+        {
+            "name": "delete_user_appliance",
+            "args": {"appliance_id": f"app-{i}", "confirmed": True},
+            "id": f"call_{i}",
+        }
+        for i in range(5)
+    ]
+    tool_call_output = AIMessage(content="", tool_calls=tool_calls)
+    turn1_events = [
+        {"event": "on_chat_model_end", "data": {"output": tool_call_output}}
+    ]
+
+    turn2_output = AIMessage(content="Deleted 5 appliances for you.", tool_calls=[])
+    turn2_events = [
+        {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": AIMessageChunk(content="Done")},
+        },
+        {"event": "on_chat_model_end", "data": {"output": turn2_output}},
+    ]
+
+    bound_model.astream_events = MagicMock(
+        side_effect=[_async_gen(turn1_events), _async_gen(turn2_events)]
+    )
+    mock_model.bind_tools = MagicMock(return_value=bound_model)
+
+    mock_appliance_service = MagicMock()
+    mock_appliance_service.delete_appliance.return_value = True
+
+    service = AgentService(
+        model=mock_model,
+        appliance_service=mock_appliance_service,
+        dashboard_service=MagicMock(),
+        web_search_service=MagicMock(),
+    )
+
+    emitted_events = [
+        event
+        async for event in service.stream_chat("user1", "Maria", "Delete 5 appliances")
+    ]
+
+    activity_events = [
+        e
+        for e in emitted_events
+        if isinstance(e, StreamActivityEvent) and e.id == "act-delete-appliance"
+    ]
+    assert len(activity_events) == 2
+    assert activity_events[0].status == "started"
+    assert activity_events[0].message == "Deleting 5 appliances..."
+    assert activity_events[1].status == "completed"
+    assert activity_events[1].message == "Deleted 5 appliances"
+
+
+@pytest.mark.anyio
+async def test_dynamic_activity_message_found_appliances():
+    """
+    Test that get_user_appliances returning 3 items yields 'Found 3 appliances'.
+    """
+    mock_model = MagicMock()
+    bound_model = MagicMock()
+
+    tool_call_output = AIMessage(
+        content="",
+        tool_calls=[{"name": "get_user_appliances", "args": {}, "id": "call_1"}],
+    )
+    turn1_events = [
+        {"event": "on_chat_model_end", "data": {"output": tool_call_output}}
+    ]
+
+    turn2_output = AIMessage(content="You have 3 appliances.", tool_calls=[])
+    turn2_events = [
+        {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": AIMessageChunk(content="3 items")},
+        },
+        {"event": "on_chat_model_end", "data": {"output": turn2_output}},
+    ]
+
+    bound_model.astream_events = MagicMock(
+        side_effect=[_async_gen(turn1_events), _async_gen(turn2_events)]
+    )
+    mock_model.bind_tools = MagicMock(return_value=bound_model)
+
+    now = datetime.now(timezone.utc)
+    mock_appliance_service = MagicMock()
+    mock_appliance_service.get_appliances.return_value = [
+        ApplianceResponse(
+            id=f"a-{i}",
+            user_id="u1",
+            name=f"App {i}",
+            category="Cooling",
+            wattage_watts=100.0,
+            daily_usage_hours=2.0,
+            icon="plug",
+            is_active=True,
+            monthly_kwh=6.0,
+            created_at=now,
+            updated_at=now,
+        )
+        for i in range(3)
+    ]
+
+    service = AgentService(
+        model=mock_model,
+        appliance_service=mock_appliance_service,
+        dashboard_service=MagicMock(),
+        web_search_service=MagicMock(),
+    )
+
+    emitted_events = [
+        event
+        async for event in service.stream_chat("user1", "Maria", "Show appliances")
+    ]
+
+    activity_events = [
+        e
+        for e in emitted_events
+        if isinstance(e, StreamActivityEvent) and e.id == "act-appliances"
+    ]
+    assert len(activity_events) == 2
+    assert activity_events[0].status == "started"
+    assert activity_events[0].message == "Reviewing your appliances..."
+    assert activity_events[1].status == "completed"
+    assert activity_events[1].message == "Found 3 appliances"
