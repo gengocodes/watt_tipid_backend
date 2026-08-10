@@ -20,7 +20,6 @@ from pydantic import ValidationError
 from app.constants.agent import TOOL_ACTIVITY_CONFIG
 from app.prompts.agent import get_system_prompt
 from app.schemas.agent import (
-    ActivityStatus,
     AgentStreamEvent,
     ChatHistoryMessage,
     ChatResponse,
@@ -37,7 +36,7 @@ from app.schemas.agent import (
 from app.services.appliance_service import ApplianceService
 from app.services.dashboard_service import DashboardService
 from app.services.web_search_service import WebSearchService
-from app.services.tool_executor import ToolExecutor
+from app.services.tool_executor import ToolExecutor, ExecutedToolResult
 from app.tools.agent_tools import (
     create_user_appliances_tool,
     create_user_energy_summary_tool,
@@ -169,31 +168,103 @@ class AgentService:
                 pass
         return None
 
-    @staticmethod
-    def _create_tool_activity_event(
-        tool_name: str,
-        status: ActivityStatus,
-        search_args: WebSearchToolArgs | None = None,
-    ) -> StreamActivityEvent | None:
-        """Create a typed StreamActivityEvent from declarative config."""
+    @classmethod
+    def _get_activity_id(cls, tool_name: str, turn: int) -> str:
+        """Get canonical activity ID matching TOOL_ACTIVITY_CONFIG."""
         config = TOOL_ACTIVITY_CONFIG.get(tool_name)
-        if not config:
-            return None
+        base_id = config["id"] if config else f"act-{tool_name}"
+        return base_id if turn == 0 else f"{base_id}-turn-{turn}"
 
-        if tool_name == "web_search" and search_args:
-            message = (
-                f'Searching: "{search_args.query}"'
-                if status == "started"
-                else f'Found search results for: "{search_args.query}"'
+    @classmethod
+    def _build_started_activity_message(
+        cls, tool_name: str, tool_calls: list[ToolCall]
+    ) -> str:
+        """Construct a dynamic started activity message based on tool_name and call count."""
+        count = len(tool_calls)
+
+        if tool_name == "web_search":
+            if count == 1:
+                search_args = cls._parse_search_args(tool_calls[0])
+                if search_args:
+                    return f'Searching: "{search_args.query}"'
+            return f"Searching web for {count} queries..."
+
+        if tool_name == "get_user_appliances":
+            return "Reviewing your appliances..."
+        if tool_name == "get_user_energy_summary":
+            return "Analyzing your energy usage..."
+        if tool_name == "add_user_appliance":
+            return (
+                "Adding 1 appliance..."
+                if count == 1
+                else f"Adding {count} appliances..."
             )
-        else:
-            message = config["started"] if status == "started" else config["completed"]
+        if tool_name == "update_user_appliance":
+            return (
+                "Updating 1 appliance..."
+                if count == 1
+                else f"Updating {count} appliances..."
+            )
+        if tool_name == "delete_user_appliance":
+            return (
+                "Deleting 1 appliance..."
+                if count == 1
+                else f"Deleting {count} appliances..."
+            )
 
-        return StreamActivityEvent(
-            id=config["id"],
-            message=message,
-            status=status,
-        )
+        config = TOOL_ACTIVITY_CONFIG.get(tool_name)
+        return config["started"] if config else f"Executing {tool_name}..."
+
+    @classmethod
+    def _build_completed_activity_message(
+        cls, tool_name: str, results: list[ExecutedToolResult]
+    ) -> str:
+        """Construct a dynamic completed activity message inspecting typed execution results."""
+        total = len(results)
+        succeeded = sum(1 for r in results if r.success)
+        failed = total - succeeded
+
+        if tool_name == "web_search":
+            if total == 1 and results[0].tool_args.get("query"):
+                q = results[0].tool_args["query"]
+                return f'Found search results for: "{q}"'
+            return f"Found search results for {total} queries"
+
+        if tool_name == "get_user_appliances":
+            if (
+                total > 0
+                and results[0].success
+                and isinstance(results[0].raw_result, list)
+            ):
+                app_count = len(results[0].raw_result)
+                if app_count == 0:
+                    return "No appliances found"
+                if app_count == 1:
+                    return "Found 1 appliance"
+                return f"Found {app_count} appliances"
+            return "Reviewed appliances"
+
+        if tool_name == "get_user_energy_summary":
+            return "Analyzed energy usage"
+
+        action_verbs = {
+            "add_user_appliance": ("Added", "add"),
+            "update_user_appliance": ("Updated", "update"),
+            "delete_user_appliance": ("Deleted", "delete"),
+        }
+
+        if tool_name in action_verbs:
+            past_verb, base_verb = action_verbs[tool_name]
+            noun = "appliance" if total == 1 else "appliances"
+
+            if succeeded > 0 and failed == 0:
+                return f"{past_verb} {succeeded} {noun}"
+            if succeeded > 0 and failed > 0:
+                return f"{past_verb} {succeeded} of {total} {noun} ({failed} failed)"
+            return f"Failed to {base_verb} {noun}"
+
+        config = TOOL_ACTIVITY_CONFIG.get(tool_name)
+        return config["completed"] if config else f"Completed {tool_name}"
 
     async def chat(
         self,
@@ -299,31 +370,50 @@ class AgentService:
                 )
                 ctx.messages.append(current_ai_message)
 
-                for tool_call in current_ai_message.tool_calls:
-                    name = tool_call["name"]
-                    search_args = self._parse_search_args(tool_call)
-                    activity = self._create_tool_activity_event(
-                        name, "started", search_args=search_args
-                    )
-                    if activity:
-                        yield activity
+                # Group tool calls by tool_name in current turn
+                grouped_tool_calls: dict[str, list[ToolCall]] = {}
+                for tc in current_ai_message.tool_calls:
+                    grouped_tool_calls.setdefault(tc["name"], []).append(tc)
 
+                # Emit started StreamActivityEvent per tool group
+                for tool_name, calls in grouped_tool_calls.items():
+                    activity_id = self._get_activity_id(tool_name, turn)
+                    message = self._build_started_activity_message(tool_name, calls)
+                    yield StreamActivityEvent(
+                        id=activity_id,
+                        message=message,
+                        status="started",
+                    )
+
+                # Emit tool start events
                 for tool_call in current_ai_message.tool_calls:
                     yield StreamToolStartEvent(tool_name=tool_call["name"])
 
-                await tool_executor.execute(current_ai_message.tool_calls, ctx.messages)
+                # Execute tools
+                executed_results = await tool_executor.execute(
+                    current_ai_message.tool_calls, ctx.messages
+                )
 
+                # Emit tool end events
                 for tool_call in current_ai_message.tool_calls:
                     yield StreamToolEndEvent(tool_name=tool_call["name"])
 
-                for tool_call in current_ai_message.tool_calls:
-                    name = tool_call["name"]
-                    search_args = self._parse_search_args(tool_call)
-                    activity = self._create_tool_activity_event(
-                        name, "completed", search_args=search_args
+                # Group executed_results by tool_name
+                grouped_results: dict[str, list[ExecutedToolResult]] = {}
+                for r in executed_results:
+                    grouped_results.setdefault(r.tool_name, []).append(r)
+
+                # Emit completed StreamActivityEvent per group using SAME activity_id
+                for tool_name, res_list in grouped_results.items():
+                    activity_id = self._get_activity_id(tool_name, turn)
+                    message = self._build_completed_activity_message(
+                        tool_name, res_list
                     )
-                    if activity:
-                        yield activity
+                    yield StreamActivityEvent(
+                        id=activity_id,
+                        message=message,
+                        status="completed",
+                    )
 
             # If all max_tool_turns were spent executing tools without a final text output,
             # force text generation turn
