@@ -2,6 +2,7 @@
 Dashboard service layer
 """
 
+from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from app.repositories.appliance import ApplianceRepository
 from app.repositories.monthly_energy import MonthlyEnergyRepository
@@ -10,6 +11,7 @@ from app.schemas.energy import (
     EnergySummaryResponse,
     CategoryShare,
     MonthlyTrendItem,
+    MonthlyTrendCreate,
     ApplianceResponse,
 )
 from app.utils.energy_calc import (
@@ -90,6 +92,19 @@ class DashboardService:
             MonthlyTrendItem(month=t.month, kwh=t.kwh, cost=t.cost_php) for t in trends
         ]
 
+        # Automatically include current month's calculated projection if not explicitly logged
+        current_month_str = datetime.now(timezone.utc).strftime("%Y-%m")
+        if not any(t.month == current_month_str for t in monthly_trend):
+            monthly_trend.append(
+                MonthlyTrendItem(
+                    month=current_month_str,
+                    kwh=round(total_kwh, 2),
+                    cost=round(estimated_cost, 2),
+                )
+            )
+
+        monthly_trend.sort(key=lambda item: item.month)
+
         # 6. Apply rounding ONLY immediately before return
         return EnergySummaryResponse(
             estimated_monthly_cost=round(estimated_cost, 2),
@@ -101,3 +116,48 @@ class DashboardService:
             category_shares=category_shares,
             monthly_trend=monthly_trend,
         )
+
+    def log_monthly_trend(
+        self, user_id: str, data: MonthlyTrendCreate
+    ) -> MonthlyTrendItem:
+        """Log or update a historical monthly energy record for the user"""
+        current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+        if data.month > current_month:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot log monthly energy data for future months",
+            )
+
+        user_db = self.user_repo.get_by_id(user_id)
+        if not user_db:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User profile not found",
+            )
+
+        rate = user_db.settings.electricity_rate_php_kwh
+        resolved_cost = (
+            data.cost_php if data.cost_php is not None else (data.kwh * rate)
+        )
+
+        record = self.monthly_energy_repo.upsert_trend(
+            user_id=user_id,
+            month=data.month,
+            kwh=data.kwh,
+            cost_php=resolved_cost,
+            rate_php_kwh=rate,
+        )
+
+        return MonthlyTrendItem(
+            month=record.month, kwh=record.kwh, cost=record.cost_php
+        )
+
+    def delete_monthly_trend(self, user_id: str, month: str) -> bool:
+        """Delete a monthly energy trend record for the user"""
+        deleted = self.monthly_energy_repo.delete_trend(user_id, month)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Monthly energy record for {month} not found",
+            )
+        return True

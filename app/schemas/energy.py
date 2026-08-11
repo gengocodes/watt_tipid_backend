@@ -24,7 +24,11 @@ class ApplianceCreate(BaseModel):
     daily_usage_hours: float = Field(
         ..., gt=0, le=24, description="Average run hours per day"
     )
-    icon: str = Field("plug", description="Icon identifier string")
+    icon: Optional[str] = Field(
+        "plug",
+        deprecated=True,
+        description="[DEPRECATED] Legacy icon identifier string",
+    )
 
 
 class ApplianceUpdate(BaseModel):
@@ -38,7 +42,11 @@ class ApplianceUpdate(BaseModel):
     daily_usage_hours: Optional[float] = Field(
         None, gt=0, le=24, description="Average run hours per day"
     )
-    icon: Optional[str] = Field(None, description="Icon identifier string")
+    icon: Optional[str] = Field(
+        None,
+        deprecated=True,
+        description="[DEPRECATED] Legacy icon identifier string",
+    )
     is_active: Optional[bool] = Field(None, description="Toggle active status")
 
 
@@ -64,6 +72,20 @@ class MonthlyTrendItem(BaseModel):
     month: str = Field(..., description="YYYY-MM format")
     kwh: float
     cost: float
+
+
+class MonthlyTrendCreate(BaseModel):
+    """Schema for manually logging or updating a monthly energy trend record"""
+
+    month: str = Field(
+        ...,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description="Month in YYYY-MM format",
+    )
+    kwh: float = Field(..., gt=0, description="Monthly energy consumption in kWh")
+    cost_php: Optional[float] = Field(
+        None, gt=0, description="Optional total bill cost in PHP"
+    )
 
 
 class EnergySummaryResponse(BaseModel):

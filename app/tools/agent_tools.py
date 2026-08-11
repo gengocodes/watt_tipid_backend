@@ -152,7 +152,6 @@ def create_add_user_appliance_tool(
         category: str,
         wattage_watts: float,
         daily_usage_hours: float,
-        icon: str = "plug",
     ) -> AgentToolResult[ApplianceResponse]:
         """
         Register a new appliance for the authenticated user.
@@ -162,7 +161,6 @@ def create_add_user_appliance_tool(
         - category: One of 'Kitchen', 'Cooling', 'Entertainment', 'Laundry', 'Lighting', 'Devices', 'Other'
         - wattage_watts: Power rating in watts (must be > 0)
         - daily_usage_hours: Average hours used per day (must be > 0 and <= 24)
-        - icon: Optional icon string (default: 'plug')
         """
         try:
             payload = ApplianceCreate(
@@ -170,7 +168,7 @@ def create_add_user_appliance_tool(
                 category=category,
                 wattage_watts=wattage_watts,
                 daily_usage_hours=daily_usage_hours,
-                icon=icon,
+                icon="plug",
             )
             created = appliance_service.create_appliance(user_id, payload)
             return AgentToolResult[ApplianceResponse](
@@ -204,13 +202,12 @@ def create_update_user_appliance_tool(
         category: str | None = None,
         wattage_watts: float | None = None,
         daily_usage_hours: float | None = None,
-        icon: str | None = None,
         is_active: bool | None = None,
     ) -> AgentToolResult[ApplianceResponse]:
         """
         Update an existing appliance for the authenticated user.
         Requires appliance_id (UUID string).
-        Optional fields to update: name, category, wattage_watts, daily_usage_hours, icon, is_active.
+        Optional fields to update: name, category, wattage_watts, daily_usage_hours, is_active.
         """
         try:
             payload = ApplianceUpdate(
@@ -218,7 +215,7 @@ def create_update_user_appliance_tool(
                 category=category,
                 wattage_watts=wattage_watts,
                 daily_usage_hours=daily_usage_hours,
-                icon=icon,
+                icon=None,
                 is_active=is_active,
             )
             updated = appliance_service.update_appliance(user_id, appliance_id, payload)

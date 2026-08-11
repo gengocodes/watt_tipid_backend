@@ -176,8 +176,9 @@ def test_get_dashboard_summary():
     assert data["electricity_rate_php_kwh"] == 10.0
     assert data["energy_saving_score"] == 97
     assert data["score_status"] == "Excellent"
-    assert len(data["monthly_trend"]) == 1
+    assert len(data["monthly_trend"]) == 2
     assert data["monthly_trend"][0]["month"] == "2026-06"
+    assert data["monthly_trend"][1]["kwh"] == 18.0
 
 
 def test_get_user_settings_default():
@@ -218,3 +219,57 @@ def test_patch_user_settings():
     data = response.json()
     assert data["electricity_rate_php_kwh"] == 15.0
     mock_user_repo.update_settings.assert_called_once_with(MOCK_USER_ID, 15.0)
+
+
+def test_post_monthly_trend_success():
+    """Verify POST /dashboard/monthly-trend logs record and falls back to user rate if cost omitted"""
+    mock_user_repo.get_by_id.return_value = UserInDB(
+        id=MOCK_USER_ID,
+        email="test@watttipid.ph",
+        password="hashedpassword",
+        first_name="Maria",
+        last_name="Santos",
+        is_active=True,
+        barangay_city="Cebu City",
+        settings=UserSettings(electricity_rate_php_kwh=10.0),
+    )
+
+    mock_energy_repo.upsert_trend.return_value = MonthlyEnergyInDB(
+        id="trend-1",
+        user_id=MOCK_USER_ID,
+        month="2026-07",
+        kwh=150.0,
+        cost_php=1500.0,
+        rate_php_kwh=10.0,
+    )
+
+    payload = {"month": "2026-07", "kwh": 150.0}
+    response = client.post("/dashboard/monthly-trend", json=payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["month"] == "2026-07"
+    assert data["kwh"] == 150.0
+    assert data["cost"] == 1500.0
+    mock_energy_repo.upsert_trend.assert_called_once_with(
+        user_id=MOCK_USER_ID,
+        month="2026-07",
+        kwh=150.0,
+        cost_php=1500.0,
+        rate_php_kwh=10.0,
+    )
+
+
+def test_post_monthly_trend_future_month_disallowed():
+    """Verify POST /dashboard/monthly-trend rejects future months with 400 Bad Request"""
+    payload = {"month": "2099-12", "kwh": 100.0}
+    response = client.post("/dashboard/monthly-trend", json=payload)
+    assert response.status_code == 400
+    assert "future months" in response.json()["detail"]
+
+
+def test_delete_monthly_trend_success():
+    """Verify DELETE /dashboard/monthly-trend/{month} calls repository deletion"""
+    mock_energy_repo.delete_trend.return_value = True
+    response = client.delete("/dashboard/monthly-trend/2026-07")
+    assert response.status_code == 200
+    mock_energy_repo.delete_trend.assert_called_once_with(MOCK_USER_ID, "2026-07")

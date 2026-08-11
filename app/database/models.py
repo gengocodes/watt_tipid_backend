@@ -114,7 +114,11 @@ class ApplianceInDB(BaseModel):
     category: str = Field(..., description="Appliance category")
     wattage_watts: float = Field(..., description="Wattage rating")
     daily_usage_hours: float = Field(..., description="Daily run hours")
-    icon: str = Field(default="plug", description="Icon identifier string")
+    icon: Optional[str] = Field(
+        default="plug",
+        deprecated=True,
+        description="[DEPRECATED] Legacy icon identifier string",
+    )
     is_active: bool = Field(
         default=True, description="Whether this appliance is active"
     )
