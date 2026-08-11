@@ -31,6 +31,9 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "WattTipid")
+CONTACT_FORM_RECIPIENT_EMAIL = os.getenv(
+    "CONTACT_FORM_RECIPIENT_EMAIL", "paulcorsino.work@gmail.com"
+)
 
 EMAIL_VERIFICATION_EXPIRE_MINUTES = int(
     os.getenv("EMAIL_VERIFICATION_EXPIRE_MINUTES", "5")
