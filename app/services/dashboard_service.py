@@ -92,6 +92,19 @@ class DashboardService:
             MonthlyTrendItem(month=t.month, kwh=t.kwh, cost=t.cost_php) for t in trends
         ]
 
+        # Automatically include current month's calculated projection if not explicitly logged
+        current_month_str = datetime.now(timezone.utc).strftime("%Y-%m")
+        if not any(t.month == current_month_str for t in monthly_trend):
+            monthly_trend.append(
+                MonthlyTrendItem(
+                    month=current_month_str,
+                    kwh=round(total_kwh, 2),
+                    cost=round(estimated_cost, 2),
+                )
+            )
+
+        monthly_trend.sort(key=lambda item: item.month)
+
         # 6. Apply rounding ONLY immediately before return
         return EnergySummaryResponse(
             estimated_monthly_cost=round(estimated_cost, 2),

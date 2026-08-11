@@ -176,8 +176,9 @@ def test_get_dashboard_summary():
     assert data["electricity_rate_php_kwh"] == 10.0
     assert data["energy_saving_score"] == 97
     assert data["score_status"] == "Excellent"
-    assert len(data["monthly_trend"]) == 1
+    assert len(data["monthly_trend"]) == 2
     assert data["monthly_trend"][0]["month"] == "2026-06"
+    assert data["monthly_trend"][1]["kwh"] == 18.0
 
 
 def test_get_user_settings_default():
