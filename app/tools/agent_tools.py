@@ -215,6 +215,7 @@ def create_update_user_appliance_tool(
                 category=category,
                 wattage_watts=wattage_watts,
                 daily_usage_hours=daily_usage_hours,
+                icon=None,
                 is_active=is_active,
             )
             updated = appliance_service.update_appliance(user_id, appliance_id, payload)
