@@ -44,8 +44,15 @@ class MonthlyEnergyRepository:
         now = datetime.now(timezone.utc)
         existing = self.collection.find_one({"user_id": user_id, "month": month})
         record_id = (
-            existing.get("id") if existing and "id" in existing else str(uuid4())
+            existing.get("id")
+            if existing and isinstance(existing.get("id"), str)
+            else str(uuid4())
         )
+        created_at_val = existing.get("created_at") if existing else now
+        if isinstance(created_at_val, datetime):
+            created_at_dt = created_at_val
+        else:
+            created_at_dt = now
 
         doc = {
             "id": record_id,
@@ -54,7 +61,7 @@ class MonthlyEnergyRepository:
             "kwh": float(kwh),
             "cost_php": float(cost_php),
             "rate_php_kwh": float(rate_php_kwh) if rate_php_kwh is not None else None,
-            "created_at": existing.get("created_at") if existing else now,
+            "created_at": created_at_dt,
         }
 
         self.collection.update_one(
@@ -63,7 +70,15 @@ class MonthlyEnergyRepository:
             upsert=True,
         )
 
-        return MonthlyEnergyInDB(**doc)
+        return MonthlyEnergyInDB(
+            id=record_id,
+            user_id=user_id,
+            month=month,
+            kwh=float(kwh),
+            cost_php=float(cost_php),
+            rate_php_kwh=float(rate_php_kwh) if rate_php_kwh is not None else None,
+            created_at=created_at_dt,
+        )
 
     def delete_trend(self, user_id: str, month: str) -> bool:
         """Delete a monthly energy record for a user"""
