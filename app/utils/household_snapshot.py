@@ -17,7 +17,6 @@ def serialize_appliance_snapshot(appliance: ApplianceInDB) -> Tuple[Any, ...]:
         float(appliance.wattage_watts),
         float(appliance.daily_usage_hours),
         bool(appliance.is_active),
-        appliance.icon,
     )
 
 
