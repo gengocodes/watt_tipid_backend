@@ -57,9 +57,13 @@ Activate Python environment and install packages:
 ```bash
 # Create virtual environment
 python -m venv .venv
+or
+python3 -m venv .venv
 
 # Activate environment
 .venv/Scripts/activate
+or
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt

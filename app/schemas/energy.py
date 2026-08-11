@@ -66,6 +66,20 @@ class MonthlyTrendItem(BaseModel):
     cost: float
 
 
+class MonthlyTrendCreate(BaseModel):
+    """Schema for manually logging or updating a monthly energy trend record"""
+
+    month: str = Field(
+        ...,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description="Month in YYYY-MM format",
+    )
+    kwh: float = Field(..., gt=0, description="Monthly energy consumption in kWh")
+    cost_php: Optional[float] = Field(
+        None, gt=0, description="Optional total bill cost in PHP"
+    )
+
+
 class EnergySummaryResponse(BaseModel):
     """Aggregated projection DTO for the dashboard/summary"""
 

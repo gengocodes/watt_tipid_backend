@@ -2,6 +2,8 @@
 Monthly energy repository for accessing the monthly_energy collection.
 """
 
+from datetime import datetime, timezone
+from uuid import uuid4
 from typing import Optional, List
 from pymongo.collection import Collection
 from app.database.models import MonthlyEnergyInDB
@@ -29,3 +31,41 @@ class MonthlyEnergyRepository:
             if t is not None:
                 trends.append(t)
         return trends
+
+    def upsert_trend(
+        self,
+        user_id: str,
+        month: str,
+        kwh: float,
+        cost_php: float,
+        rate_php_kwh: Optional[float] = None,
+    ) -> MonthlyEnergyInDB:
+        """Create or update a monthly energy record for a user"""
+        now = datetime.now(timezone.utc)
+        existing = self.collection.find_one({"user_id": user_id, "month": month})
+        record_id = (
+            existing.get("id") if existing and "id" in existing else str(uuid4())
+        )
+
+        doc = {
+            "id": record_id,
+            "user_id": user_id,
+            "month": month,
+            "kwh": float(kwh),
+            "cost_php": float(cost_php),
+            "rate_php_kwh": float(rate_php_kwh) if rate_php_kwh is not None else None,
+            "created_at": existing.get("created_at") if existing else now,
+        }
+
+        self.collection.update_one(
+            {"user_id": user_id, "month": month},
+            {"$set": doc},
+            upsert=True,
+        )
+
+        return MonthlyEnergyInDB(**doc)
+
+    def delete_trend(self, user_id: str, month: str) -> bool:
+        """Delete a monthly energy record for a user"""
+        result = self.collection.delete_one({"user_id": user_id, "month": month})
+        return result.deleted_count > 0
