@@ -16,6 +16,13 @@ monthly_energy_collection: Collection = database["monthly_energy"]
 saving_tips_collection: Collection = database["saving_tips"]
 saving_tip_sessions_collection: Collection = database["saving_tip_sessions"]
 
+# Create partial unique index on google_id field for Google-linked accounts
+users_collection.create_index(
+    "google_id",
+    unique=True,
+    partialFilterExpression={"google_id": {"$type": "string"}},
+)
+
 # Create TTL index on expires_at field.
 # MongoDB automatically removes expired refresh tokens in the background.
 refresh_tokens_collection.create_index("expires_at", expireAfterSeconds=0)

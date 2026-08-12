@@ -56,6 +56,7 @@ def setup_overrides():
     mock_redis.exists.reset_mock()
 
     yield
+    fastapi_app.dependency_overrides.clear()
 
 
 client = TestClient(fastapi_app)

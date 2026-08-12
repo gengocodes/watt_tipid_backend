@@ -71,6 +71,7 @@ def setup_overrides():
     mock_appliance_repo.reset_mock()
     mock_energy_repo.reset_mock()
     yield
+    app.dependency_overrides.clear()
 
 
 client = TestClient(app)

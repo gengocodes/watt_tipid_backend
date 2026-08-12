@@ -74,13 +74,17 @@ class UserInDB(BaseModel):
 
     id: str = Field(..., description="Unique user UUIDv4 string")
     email: str = Field(..., description="User email address")
-    password: str = Field(..., description="Hashed password string")
+    password: Optional[str] = Field(
+        default=None,
+        description="Hashed password string or None for Google-only accounts",
+    )
     first_name: str = Field(..., description="First name")
     last_name: str = Field(..., description="Last name")
     is_active: bool = Field(
         default=True, description="Whether the user account is active"
     )
-    barangay_city: str = Field(..., description="User's location")
+    barangay_city: str = Field(default="", description="User's location")
+    google_id: Optional[str] = Field(default=None, description="Google OAuth sub ID")
     email_verified_at: Optional[datetime] = Field(
         default=None, description="UTC email verification time"
     )

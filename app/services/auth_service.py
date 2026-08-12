@@ -9,6 +9,8 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple
 from fastapi import HTTPException, status, BackgroundTasks
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 from app.database.models import UserInDB, RefreshTokenInDB
 from app.repositories.user import UserRepository
@@ -26,6 +28,7 @@ from app.core.config import (
     EMAIL_VERIFICATION_EXPIRE_MINUTES,
     EMAIL_VERIFICATION_RESEND_SECONDS,
     EMAIL_VERIFICATION_MAX_ATTEMPTS,
+    GOOGLE_CLIENT_ID,
 )
 from app.core.logging_config import bind_user_context
 from app.database.redis import redis_client
@@ -219,7 +222,11 @@ class AuthService:
     def login(self, data: LoginRequest) -> Tuple[UserResponse, str, str]:
         """Authenticate user credentials and generate access/refresh tokens"""
         user_db = self.user_repo.get_by_email(data.email)
-        if not user_db or not verify_password(data.password, user_db.password):
+        if (
+            not user_db
+            or user_db.password is None
+            or not verify_password(data.password, user_db.password)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
@@ -246,6 +253,107 @@ class AuthService:
         self.refresh_token_repo.create_token(refresh_token_record)
         bind_user_context(user_id)
         logger.info("User logged in successfully")
+
+        response_user = UserResponse(
+            id=user_id,
+            email=user_db.email,
+            first_name=user_db.first_name,
+            last_name=user_db.last_name,
+            barangay_city=user_db.barangay_city,
+            created_at=user_db.created_at,
+        )
+
+        return response_user, access_token, raw_refresh_token
+
+    async def google_login(self, credential: str) -> Tuple[UserResponse, str, str]:
+        """Authenticate user via Google OIDC credential ID token and return access/refresh tokens"""
+        try:
+            payload = id_token.verify_oauth2_token(
+                credential, google_requests.Request(), GOOGLE_CLIENT_ID
+            )
+        except Exception as e:
+            logger.warning("Failed Google ID token verification: %s", str(e))
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid Google credential: {e}",
+            ) from e
+
+        if not payload.get("email_verified"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google email is not verified",
+            )
+
+        google_sub = payload.get("sub")
+        email = payload.get("email", "").strip().lower()
+        given_name = payload.get("given_name", "")
+        family_name = payload.get("family_name", "")
+
+        if not google_sub or not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Google profile data",
+            )
+
+        # 1. Lookup by google_id (Google sub)
+        user_db = self.user_repo.get_by_google_id(google_sub)
+
+        # 2. Lookup by email if not matched by google_id
+        if not user_db:
+            user_db = self.user_repo.get_by_email(email)
+            if user_db:
+                # Link existing user account
+                verified_at = user_db.email_verified_at or datetime.now(timezone.utc)
+                self.user_repo.link_google_account(
+                    user_db.id,
+                    google_sub,
+                    email_verified_at=verified_at,
+                )
+                user_db.google_id = google_sub
+                if not user_db.email_verified_at:
+                    user_db.email_verified_at = verified_at
+                # Clean up any pending Redis verification keys
+                code_key = f"register:code:{email}"
+                data_key = f"register:data:{email}"
+                cooldown_key = f"register:cooldown:{email}"
+                await redis_client.delete(code_key, data_key, cooldown_key)
+
+        # 3. Create new user if no match found
+        if not user_db:
+            user_id = str(uuid.uuid4())
+            user_db = UserInDB(
+                id=user_id,
+                email=email,
+                password=None,
+                first_name=given_name if given_name else email.split("@")[0],
+                last_name=family_name,
+                is_active=True,
+                barangay_city="",
+                google_id=google_sub,
+                email_verified_at=datetime.now(timezone.utc),
+            )
+            self.user_repo.create_user(user_db)
+
+        user_id = user_db.id
+        access_token = create_access_token(user_id)
+        raw_refresh_token = generate_refresh_token()
+        hashed_refresh_token = hash_token(raw_refresh_token)
+
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            days=REFRESH_TOKEN_EXPIRE_DAYS
+        )
+        refresh_token_record = RefreshTokenInDB(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            token_hash=hashed_refresh_token,
+            expires_at=expires_at,
+            revoked=False,
+            created_at=datetime.now(timezone.utc),
+        )
+
+        self.refresh_token_repo.create_token(refresh_token_record)
+        bind_user_context(user_id)
+        logger.info("User %s authenticated via Google successfully", email)
 
         response_user = UserResponse(
             id=user_id,
