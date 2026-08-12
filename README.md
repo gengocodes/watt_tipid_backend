@@ -16,7 +16,7 @@ The backend handles core energy calculations, appliance tracking, user settings,
 - **Database Engine**: MongoDB (Atlas/Local) via PyMongo (`4.13.2`) with typed Pydantic models
 - **Caching & Session Storage**: Redis (`6.2.0`)
 - **AI & Agent Infrastructure**: LangChain (`1.3.9`), `langchain-google-genai` (`4.3.2`) (Gemini LLM), DuckDuckGo Search (`ddgs` `9.5.3`)
-- **Security & Authentication**: JWT (PyJWT/`python-jose`), `passlib` with `bcrypt` password hashing, rotating HTTP-only cookies
+- **Security & Authentication**: JWT (PyJWT/`python-jose`), Google OAuth 2.0 ID Token Verification (`google-auth`), `passlib` with `bcrypt` password hashing, rotating HTTP-only cookies
 - **Email Infrastructure**: SMTP (`smtplib` + MIME HTML templates), FastAPI `BackgroundTasks`
 - **Validation**: Pydantic v2
 - **Testing**: `pytest` (`9.0.3`), `pytest-asyncio`, `httpx`
@@ -86,6 +86,7 @@ watt_tipid_backend/
 ### 1. Database & Indexing Strategy
 - **MongoDB Collections**: `users`, `refresh_tokens`, `appliances`, `monthly_energy`, `saving_tips`, `saving_tip_sessions`.
 - **Indexes**:
+  - `users`: Partial unique index on `google_id` (`{"google_id": {"$type": "string"}}`).
   - `refresh_tokens`: TTL index on `expires_at` (`expireAfterSeconds=0`).
   - `appliances`: Compound index on `[("user_id", 1), ("is_active", 1)]`.
   - `monthly_energy`: Compound unique index on `[("user_id", 1), ("month", 1)]`.
@@ -93,6 +94,7 @@ watt_tipid_backend/
   - `saving_tip_sessions`: Compound index on `[("user_id", 1), ("started_at", -1)]`.
 
 ### 2. Authentication & Security
+- **JWT & Google OAuth 2.0 Integration**: Supports native email/password authentication alongside Google OIDC ID Token verification (`POST /auth/google`) using `google-auth`. Automatically links Google accounts to existing email profiles or registers new users upon verification.
 - **Cookie Security**: Emits `access_token` (15-min TTL) and `refresh_token` (7-day TTL) in `HttpOnly`, `SameSite` cookies.
 - **Refresh Token Rotation**: Revokes previous token hash (`token_hash`) upon refresh and issues a fresh token pair.
 - **Registration Verification**: 6-digit numeric OTP code sent via email, cached in Redis with a 5-minute TTL, rate limited to 3 failed attempts and a 60-second resend cooldown.
@@ -131,6 +133,7 @@ watt_tipid_backend/
 | `POST` | `/auth/register/verify` | Verifies OTP code & creates user account | None |
 | `POST` | `/auth/register/resend` | Resends OTP verification code | None |
 | `POST` | `/auth/login` | Authenticates user & sets HttpOnly cookies | None |
+| `POST` | `/auth/google` | Authenticates via Google OIDC ID token, links account, sets cookies | None |
 | `POST` | `/auth/refresh` | Rotates refresh token & updates cookies | Cookie Auth |
 | `POST` | `/auth/logout` | Revokes refresh token & clears cookies | Cookie Auth |
 | `GET` | `/auth/me` | Fetches authenticated user profile | Cookie Auth |
@@ -171,6 +174,7 @@ Configured in `.env` (refer to `.env.example`):
 | **Database** | `MONGODB_DB_NAME` | Target database name | `watt_tipid_db` |
 | **Cache** | `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` |
 | **Security** | `JWT_SECRET` | Secret key for HS256 JWT signing | *(Keep Secret)* |
+| **Security** | `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Web Client ID for OIDC verification | `your-client-id.apps.googleusercontent.com` |
 | **AI / LLM** | `GEMINI_API_KEY` | API key for Google Gemini LLM | *(Keep Secret)* |
 | **Tariff** | `DEFAULT_ELECTRICITY_RATE` | Default rate in PHP per kWh | `12.50` |
 | **Email** | `SMTP_HOST` / `SMTP_PORT` | SMTP server configuration | `smtp.gmail.com` / `587` |
