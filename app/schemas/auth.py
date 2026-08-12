@@ -3,6 +3,7 @@ Authentication schemas
 """
 
 from datetime import datetime
+from typing import Optional
 from pydantic import BaseModel, EmailStr
 
 
@@ -45,12 +46,18 @@ class User(BaseModel):
 
     id: str
     email: str
-    password: str
+    password: Optional[str] = None # Google Auth doesn't need a password
     first_name: str
     last_name: str
     is_active: bool
     barangay_city: str
     created_at: datetime
+
+
+class GoogleLoginRequest(BaseModel):
+    """Google OAuth credential login request schema"""
+
+    credential: str
 
 
 class RegisterVerifyRequest(BaseModel):

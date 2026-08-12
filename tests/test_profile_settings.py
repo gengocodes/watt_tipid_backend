@@ -14,13 +14,16 @@ import pytest
 import pymongo
 import app.database.redis
 
+_original_mongo_client = pymongo.MongoClient
 pymongo.MongoClient = MagicMock()
+
 if not isinstance(app.database.redis.redis_client, AsyncMock):
     app.database.redis.redis_client = AsyncMock()
 app.database.redis.redis_client.incr.return_value = 1
 app.database.redis.redis_client.expire.return_value = True
 
 redis_client = app.database.redis.redis_client
+
 from app.main import app
 from app.dependencies.auth import get_current_user
 from app.schemas.auth import User
@@ -90,11 +93,13 @@ def setup_overrides():
     mock_token_repo.reset_mock()
     mock_appliance_repo.reset_mock()
     mock_energy_repo.reset_mock()
-    
+
     redis_client.get.side_effect = None
     redis_client.get.return_value = None
     redis_client.get.reset_mock()
     yield
+    app.dependency_overrides.clear()
+    pymongo.MongoClient = _original_mongo_client
 
 
 client = TestClient(app)
@@ -148,21 +153,21 @@ def test_verify_email_change_success():
     """Verify email verification succeeds, updates DB, and revokes tokens"""
     code = "123456"
     hashed_code = hash_token(code)
-    
+
     mock_user_repo.get_by_email.return_value = None
-    
+
     async def mock_redis_get(key):
         if key == f"email_change:data:{MOCK_USER_ID}":
             return json.dumps({"new_email": "new_email@watttipid.ph"})
         if key == f"email_change:code:{MOCK_USER_ID}":
             return json.dumps({"code_hash": hashed_code, "attempts": 0})
         return None
-        
+
     redis_client.get.side_effect = mock_redis_get
-    
+
     payload = {"code": code}
     response = client.post("/users/email/verify", json=payload)
-    
+
     assert response.status_code == 200
     assert response.json()["email"] == "new_email@watttipid.ph"
     mock_user_repo.update_email.assert_called_once_with(
@@ -258,8 +263,7 @@ def test_protected_endpoints_reject_revoked_refresh_tokens():
         id="token-id",
         user_id=MOCK_USER_ID,
         token_hash="somehash",
-        expires_at=datetime.now(timezone.utc)
-        + timedelta(days=1),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
         revoked=True,
         created_at=datetime.now(timezone.utc),
     )

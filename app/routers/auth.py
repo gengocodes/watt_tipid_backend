@@ -16,6 +16,7 @@ from fastapi import (
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
+    GoogleLoginRequest,
     UserResponse,
     User,
     RegisterVerifyRequest,
@@ -47,7 +48,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 async def register(
     data: RegisterRequest,
     background_tasks: BackgroundTasks,
-    auth_service: AuthService = Depends(get_auth_service),
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ):
     """Register a new user (initiates email verification flow)"""
     email = await auth_service.register(data, background_tasks)
@@ -63,7 +64,7 @@ async def register(
 )
 async def register_verify(
     data: RegisterVerifyRequest,
-    auth_service: AuthService = Depends(get_auth_service),
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ):
     """Verify registration code and commit user creation"""
     user_id = await auth_service.verify_register(data.email, data.code)
@@ -81,7 +82,7 @@ async def register_verify(
 async def register_resend(
     data: RegisterResendRequest,
     background_tasks: BackgroundTasks,
-    auth_service: AuthService = Depends(get_auth_service),
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ):
     """Resend registration verification code"""
     await auth_service.resend_register_code(data.email, background_tasks)
@@ -100,10 +101,51 @@ async def register_resend(
 async def login(
     data: LoginRequest,
     response: Response,
-    auth_service: AuthService = Depends(get_auth_service),
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ):
     """Authenticate user, store hashed refresh token, and set HttpOnly cookies"""
     user_res, access_token, raw_refresh_token = auth_service.login(data)
+
+    # Set HttpOnly cookies
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
+
+    return user_res
+
+
+@router.post(
+    "/google",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"description": "Invalid Google credential or unverified email"},
+        401: {"description": "Google authentication failed"},
+    },
+)
+async def google_login(
+    data: GoogleLoginRequest,
+    response: Response,
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+):
+    """Authenticate user with Google OIDC ID token, link/create account, and set HttpOnly cookies"""
+    user_res, access_token, raw_refresh_token = await auth_service.google_login(
+        data.credential
+    )
 
     # Set HttpOnly cookies
     response.set_cookie(
@@ -137,7 +179,7 @@ async def login(
 async def refresh(
     request: Request,
     response: Response,
-    auth_service: AuthService = Depends(get_auth_service),
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ):
     """Validate, rotate refresh token, and set new cookies"""
     raw_refresh_token = request.cookies.get("refresh_token")
@@ -177,7 +219,7 @@ async def refresh(
 async def logout(
     request: Request,
     response: Response,
-    auth_service: AuthService = Depends(get_auth_service),
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ):
     """Revoke refresh token and clear authentication cookies"""
     raw_refresh_token = request.cookies.get("refresh_token")

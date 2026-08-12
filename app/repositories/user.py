@@ -2,6 +2,7 @@
 User repository for accessing the users collection.
 """
 
+from datetime import datetime
 from typing import Optional
 from pymongo.collection import Collection
 from app.database.models import UserInDB
@@ -32,6 +33,24 @@ class UserRepository:
         """Fetch user by email address"""
         doc = self.collection.find_one({"email": email})
         return self._to_model(doc)
+
+    def get_by_google_id(self, google_id: str) -> Optional[UserInDB]:
+        """Fetch user by Google sub ID"""
+        doc = self.collection.find_one({"google_id": google_id})
+        return self._to_model(doc)
+
+    def link_google_account(
+        self, user_id: str, google_id: str, email_verified_at: Optional[datetime] = None
+    ) -> bool:
+        """Link Google sub ID to an existing user and update email_verified_at if provided"""
+        update_doc = {"google_id": google_id}
+        if email_verified_at is not None:
+            update_doc["email_verified_at"] = email_verified_at
+        result = self.collection.update_one(
+            {"id": user_id},
+            {"$set": update_doc},
+        )
+        return result.modified_count > 0
 
     def create_user(self, user: UserInDB) -> None:
         """Insert a new user document"""
