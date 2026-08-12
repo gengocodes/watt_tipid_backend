@@ -3,7 +3,7 @@ User repository for accessing the users collection.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 from pymongo.collection import Collection
 from app.database.models import UserInDB
 
@@ -43,7 +43,7 @@ class UserRepository:
         self, user_id: str, google_id: str, email_verified_at: Optional[datetime] = None
     ) -> bool:
         """Link Google sub ID to an existing user and update email_verified_at if provided"""
-        update_doc = {"google_id": google_id}
+        update_doc: dict[str, Any] = {"google_id": google_id}
         if email_verified_at is not None:
             update_doc["email_verified_at"] = email_verified_at
         result = self.collection.update_one(

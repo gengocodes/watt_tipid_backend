@@ -117,7 +117,9 @@ class UserSettingsService:
                 status_code=status.HTTP_404_NOT_FOUND, detail=USER_PROFILE_NOT_FOUND
             )
 
-        if not verify_password(data.current_password, user_db.password):
+        if not user_db.password or not verify_password(
+            data.current_password, user_db.password
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password"
             )
@@ -286,7 +288,9 @@ class UserSettingsService:
         )
 
         logger.info(
-            "Resent email change verification code to %s for user %s", new_email, user_id
+            "Resent email change verification code to %s for user %s",
+            new_email,
+            user_id,
         )
 
     async def update_password(
@@ -302,7 +306,9 @@ class UserSettingsService:
                 status_code=status.HTTP_404_NOT_FOUND, detail=USER_PROFILE_NOT_FOUND
             )
 
-        if not verify_password(data.current_password, user_db.password):
+        if not user_db.password or not verify_password(
+            data.current_password, user_db.password
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password"
             )
