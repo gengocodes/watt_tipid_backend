@@ -23,7 +23,7 @@ class ApplianceService:
     def __init__(
         self,
         appliance_repo: ApplianceRepository,
-        saving_tip_repo: Optional[SavingTipRepository] = None,
+        saving_tip_repo: SavingTipRepository,
     ):
         self.appliance_repo = appliance_repo
         self.saving_tip_repo = saving_tip_repo
@@ -105,6 +105,9 @@ class ApplianceService:
 
         if existing_snapshot != updated_snapshot:
             self.appliance_repo.reset_appliance_analysis_status(appliance_id, user_id)
+            self.saving_tip_repo.mark_tips_outdated_by_appliance_id(
+                appliance_id, user_id
+            )
             updated = (
                 self.appliance_repo.get_by_id_and_user(appliance_id, user_id) or updated
             )
@@ -124,6 +127,5 @@ class ApplianceService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Appliance not found or access denied",
             )
-        if self.saving_tip_repo:
-            self.saving_tip_repo.mark_tips_stale_by_appliance_id(appliance_id, user_id)
+        self.saving_tip_repo.mark_tips_stale_by_appliance_id(appliance_id, user_id)
         logger.info("Soft-deleted appliance (id: %s)", appliance_id)

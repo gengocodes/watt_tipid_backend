@@ -41,6 +41,7 @@ class TipStatus(str, Enum):
 
     ACTIVE = "active"
     COMPLETED = "completed"
+    OUTDATED = "outdated"
     STALE = "stale"
     DELETED = "deleted"
 

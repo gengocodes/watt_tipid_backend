@@ -126,10 +126,15 @@ class SavingTipService:
             PriorityLevel.MEDIUM: 1,
             PriorityLevel.LOW: 2,
         }
-        status_order = {TipStatus.ACTIVE: 0, TipStatus.COMPLETED: 1, TipStatus.STALE: 2}
+        status_order = {
+            TipStatus.ACTIVE: 0,
+            TipStatus.COMPLETED: 1,
+            TipStatus.OUTDATED: 2,
+            TipStatus.STALE: 3,
+        }
         tips.sort(
             key=lambda t: (
-                status_order.get(t.status, 3),
+                status_order.get(t.status, 4),
                 priority_order.get(t.priority, 3),
                 -t.generated_at.timestamp(),
             )
@@ -196,10 +201,13 @@ class SavingTipService:
                 detail="Saving tip not found or access denied.",
             )
 
-        if tip.status == TipStatus.STALE and status_str != TipStatus.DELETED.value:
+        if (
+            tip.status in (TipStatus.STALE, TipStatus.OUTDATED)
+            and status_str != TipStatus.DELETED.value
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Stale tips for deleted appliances cannot be marked as completed.",
+                detail="Outdated or stale tips for modified or deleted appliances cannot be marked as completed.",
             )
 
         self.saving_tip_repo.update_status(tip_id, user_id, status_str)

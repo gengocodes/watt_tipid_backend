@@ -66,6 +66,21 @@ class SavingTipRepository:
         )
         return result.modified_count > 0
 
+    def mark_tips_outdated_by_appliance_id(
+        self, appliance_id: str, user_id: str
+    ) -> int:
+        """Mark all active/completed saving tips for a reconfigured/updated appliance as OUTDATED"""
+        now = datetime.now(timezone.utc)
+        result = self.collection.update_many(
+            {
+                "appliance_id": appliance_id,
+                "user_id": user_id,
+                "status": {"$ne": "deleted"},
+            },
+            {"$set": {"status": TipStatus.OUTDATED, "updated_at": now}},
+        )
+        return result.modified_count
+
     def mark_tips_stale_by_appliance_id(self, appliance_id: str, user_id: str) -> int:
         """Mark all active/completed saving tips for a specific appliance as STALE"""
         now = datetime.now(timezone.utc)
