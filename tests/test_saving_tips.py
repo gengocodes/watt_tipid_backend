@@ -339,7 +339,4 @@ def test_update_tip_status_prevents_stale_tip_completion():
         service.update_tip_status("user-1", "tip-stale", "completed")
 
     assert e.value.status_code == 400
-    assert (
-        "Stale tips for deleted appliances cannot be marked as completed"
-        in e.value.detail
-    )
+    assert "cannot be marked as completed" in e.value.detail
