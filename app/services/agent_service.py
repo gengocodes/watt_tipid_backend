@@ -375,43 +375,40 @@ class AgentService:
                 for tc in current_ai_message.tool_calls:
                     grouped_tool_calls.setdefault(tc["name"], []).append(tc)
 
-                # Emit started StreamActivityEvent per tool group
+                # Sequentially process each tool group: emit started, execute, emit completed
                 for tool_name, calls in grouped_tool_calls.items():
                     activity_id = self._get_activity_id(tool_name, turn)
-                    message = self._build_started_activity_message(tool_name, calls)
+                    started_message = self._build_started_activity_message(
+                        tool_name, calls
+                    )
+
+                    # 1. Emit started activity event for active group right before execution
                     yield StreamActivityEvent(
                         id=activity_id,
-                        message=message,
+                        message=started_message,
                         status="started",
                     )
 
-                # Emit tool start events
-                for tool_call in current_ai_message.tool_calls:
-                    yield StreamToolStartEvent(tool_name=tool_call["name"])
+                    # 2. Emit tool start events for calls in active group
+                    for tc in calls:
+                        yield StreamToolStartEvent(tool_name=tc["name"])
 
-                # Execute tools
-                executed_results = await tool_executor.execute(
-                    current_ai_message.tool_calls, ctx.messages
-                )
+                    # 3. Execute calls for active tool group
+                    executed_results = await tool_executor.execute(
+                        calls, ctx.messages
+                    )
 
-                # Emit tool end events
-                for tool_call in current_ai_message.tool_calls:
-                    yield StreamToolEndEvent(tool_name=tool_call["name"])
+                    # 4. Emit tool end events for calls in active group
+                    for tc in calls:
+                        yield StreamToolEndEvent(tool_name=tc["name"])
 
-                # Group executed_results by tool_name
-                grouped_results: dict[str, list[ExecutedToolResult]] = {}
-                for r in executed_results:
-                    grouped_results.setdefault(r.tool_name, []).append(r)
-
-                # Emit completed StreamActivityEvent per group using SAME activity_id
-                for tool_name, res_list in grouped_results.items():
-                    activity_id = self._get_activity_id(tool_name, turn)
-                    message = self._build_completed_activity_message(
-                        tool_name, res_list
+                    # 5. Emit completed activity event for active group upon completion
+                    completed_message = self._build_completed_activity_message(
+                        tool_name, executed_results
                     )
                     yield StreamActivityEvent(
                         id=activity_id,
-                        message=message,
+                        message=completed_message,
                         status="completed",
                     )
 
