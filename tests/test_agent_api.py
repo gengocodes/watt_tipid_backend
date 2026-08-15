@@ -634,3 +634,106 @@ async def test_dynamic_activity_message_found_appliances():
     assert activity_events[0].message == "Reviewing your appliances..."
     assert activity_events[1].status == "completed"
     assert activity_events[1].message == "Found 3 appliances"
+
+
+@pytest.mark.anyio
+async def test_stream_chat_multi_tool_group_sequential_order():
+    """
+    Test that when multiple tools are invoked in a single turn, the activity events
+    (started -> completed) are emitted sequentially per tool group rather than pre-emitted upfront.
+    """
+    mock_model = MagicMock()
+    bound_model = MagicMock()
+
+    tool_calls = [
+        {"name": "web_search", "args": {"query": "aircon watts"}, "id": "call_search"},
+        {
+            "name": "add_user_appliance",
+            "args": {
+                "name": "Aircon",
+                "category": "Cooling",
+                "wattage_watts": 1200.0,
+                "daily_usage_hours": 8.0,
+            },
+            "id": "call_add",
+        },
+    ]
+
+    turn1_output = AIMessage(content="", tool_calls=tool_calls)
+    turn1_events = [{"event": "on_chat_model_end", "data": {"output": turn1_output}}]
+
+    turn2_output = AIMessage(content="Added aircon.", tool_calls=[])
+    turn2_events = [
+        {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": AIMessageChunk(content="Done")},
+        },
+        {"event": "on_chat_model_end", "data": {"output": turn2_output}},
+    ]
+
+    bound_model.astream_events = MagicMock(
+        side_effect=[_async_gen(turn1_events), _async_gen(turn2_events)]
+    )
+    mock_model.bind_tools = MagicMock(return_value=bound_model)
+
+    mock_appliance_service = MagicMock()
+    now = datetime.now(timezone.utc)
+    mock_appliance_service.create_appliance.return_value = ApplianceResponse(
+        id="app-100",
+        user_id="u1",
+        name="Aircon",
+        category="Cooling",
+        wattage_watts=1200.0,
+        daily_usage_hours=8.0,
+        icon="plug",
+        is_active=True,
+        monthly_kwh=288.0,
+        created_at=now,
+        updated_at=now,
+    )
+    mock_web_search_service = MagicMock()
+    mock_web_search_service.search = AsyncMock(return_value={"results": []})
+
+    service = AgentService(
+        model=mock_model,
+        appliance_service=mock_appliance_service,
+        dashboard_service=MagicMock(),
+        web_search_service=mock_web_search_service,
+    )
+
+    emitted_events = [
+        event
+        async for event in service.stream_chat("u1", "Juan", "Search and add aircon")
+    ]
+
+    # Filter activity events for tool calls in turn 0
+    tool_activity_events = [
+        e
+        for e in emitted_events
+        if isinstance(e, StreamActivityEvent) and e.id in ("act-web-search", "act-add-appliance")
+    ]
+
+    # Expected order: act-web-search started -> act-web-search completed
+    # -> act-add-appliance started -> act-add-appliance completed
+    assert len(tool_activity_events) == 4
+    assert tool_activity_events[0].id == "act-web-search"
+    assert tool_activity_events[0].status == "started"
+
+    assert tool_activity_events[1].id == "act-web-search"
+    assert tool_activity_events[1].status == "completed"
+
+    assert tool_activity_events[2].id == "act-add-appliance"
+    assert tool_activity_events[2].status == "started"
+
+    assert tool_activity_events[3].id == "act-add-appliance"
+    assert tool_activity_events[3].status == "completed"
+
+
+@pytest.mark.anyio
+async def test_system_prompt_contains_critical_tool_sequencing():
+    """
+    Test that get_system_prompt includes CRITICAL TOOL SEQUENCING instruction.
+    """
+    prompt = get_system_prompt("Juan")
+    assert "CRITICAL TOOL SEQUENCING" in prompt
+    assert "web_search" in prompt
