@@ -233,3 +233,9 @@ Run static type checking with `mypy`:
 ```bash
 python -m mypy app/main.py
 ```
+
+## License
+
+Copyright (c) 2026 Paul Corsino. All rights reserved.
+
+This repository is publicly available for portfolio and educational viewing purposes only. No permission is granted to copy, modify, distribute, or use the source code for commercial purposes without prior written permission.
